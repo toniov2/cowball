@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#070b12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="application-name" content="Cowball">
+<title>Cowball — Online & Career Edition | PC, Mobile & Gamepad</title>
+<!--
+  Cowball v45 multi-file project for GitHub Pages. Все файлы лежат в корне, без папок.
+  1) loader сначала ищет three.min.js рядом с index.html, затем обращается к CDN;
+  2) manifest и иконка приложения включены; автономный offline-cache не включён, потому что Three.js пока загружается с CDN;
+  3) прогресс игры сохраняется в localStorage; необязательный backend-шаблон — server.js.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Unbounded:wght@500;700;800;900&display=swap&subset=cyrillic" rel="stylesheet">
+
+
+<link rel="icon" type="image/png" href="cowball-icon.png">
+<link rel="apple-touch-icon" href="cowball-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="description" content="Cowball — футбольная игра с коровами: матчи, турниры, карьера, Ultimate Team и онлайн-режим.">
+<meta property="og:title" content="Cowball — Online & Career Edition">
+<meta property="og:description" content="Футбольная аркада с оригинальной музыкой, звуками стадиона и текстурами.">
+<meta property="og:image" content="cowball-showcase-concept.png">
+<link rel="stylesheet" href="cowball.css">
+<link rel="stylesheet" href="cowball-v45.css">
+<link rel="stylesheet" href="cowball-v46.css">
+<link rel="stylesheet" href="cowball-v47-ui.css">
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="hud" class="hide">
+  <div id="sb">
+    <div class="seg"><span class="nm b" id="nA">БУР</span></div>
+    <div class="seg sc"><span id="s0">0</span></div>
+    <div class="seg tm"><span id="tm">1:30</span></div>
+    <div class="seg sc"><span id="s1">0</span></div>
+    <div class="seg"><span class="nm r" id="nB">РОГ</span></div>
+  </div>
+  <div id="chips"></div>
+  <div id="fps" class="hide"></div>
+  <button id="pz" data-a="pause" aria-label="Пауза"><i></i><i></i></button>
+</div>
+<div id="center"></div>
+<div id="banner"></div>
+<div id="commentary"></div>
+<div id="vig"></div><div id="flashFx"></div>
+<div id="pName" class="hide"></div>
+<div id="replayTag" class="hide">ПОВТОР <button data-a="replayCamera">Камера</button> <button data-a="skipreplay">Пропустить</button></div>
+<div id="skipTag" class="hide"><button data-a="skipintro">Пропустить ▶</button></div>
+<div id="jbase"><div id="jknob"></div></div>
+<div id="tbtns" class="hide">
+  <button class="tbtn" id="bKick"><i>⚽</i><b>УДАР</b></button>
+  <button class="tbtn" id="bPass"><i>➚</i><b>ПАС</b></button>
+  <button class="tbtn" id="bSprint"><i>⚡</i><b>РЫВОК</b></button>
+  <button class="tbtn" id="bSwitch"><i>⇄</i><b>СМЕНА</b></button>
+  <button class="tbtn" id="bCross"><i>⤴</i><b>НАВЕС</b></button>
+</div>
+<div id="hint">Веди пальцем слева</div>
+
+<div id="penhud" class="hide">
+  <div id="pA">БУР</div><div class="dots" id="pdA"></div><div class="mid">ПЕНАЛЬТИ</div><div class="dots" id="pdB"></div><div id="pB">РОГ</div>
+</div>
+<div id="penui" class="hide">
+  <div id="reticle" class="hide"></div>
+  <div id="penmsg"></div>
+  <div id="powbar" class="hide"><div id="powzone"></div><div id="powfill"></div></div>
+  <div id="dive" class="hide">
+    <button data-a="dive" data-v="-1">← Влево</button><button data-a="dive" data-v="0">Центр</button><button data-a="dive" data-v="1">Вправо →</button>
+  </div>
+</div>
+
+<!-- Главное меню -->
+<div class="scr hide" id="sc-home">
+  <div class="col"><div class="in">
+    <h1 class="logo">COW<em>BALL</em></h1>
+    <div class="sub">Коровья лига · сезон 27</div>
+    <div class="tiles" id="tiles"></div>
+    <div class="wins" id="wins"></div>
+  </div></div>
+</div>
+
+<!-- Выбор турнира -->
+<div class="scr hide solid" id="sc-training"></div>
+<div class="scr hide solid" id="sc-trainres"></div>
+
+<div class="scr hide solid deco" id="sc-tours">
+  <div class="wcol">
+    <h1 class="ttl">Турниры</h1>
+    <div class="sub" style="margin-top:0">Выбери соревнование. Играешь за свою команду, остальные матчи считает игра.</div>
+    <div class="cards" id="tourCards"></div>
+    <div class="tfoot"><button class="mi" data-a="home">Назад</button></div>
+  </div>
+</div>
+
+<!-- Выбор команды -->
+<div class="scr hide solid deco" id="sc-teams">
+  <div class="wcol">
+    <h1 class="ttl" id="teamsTitle">Выбери команду</h1>
+    <div class="tgrid" id="teamGrid"></div>
+    <div id="matchupPreview" class="matchup-preview hide" aria-live="polite"></div>
+    <div class="tfoot">
+      <button class="mi" data-a="teamback">Назад</button>
+      <div id="teamInfo"></div>
+      <button class="mi pri" data-a="teamgo" id="teamGo">Дальше</button>
+    </div>
+  </div>
+</div>
+
+<!-- Турнирный хаб -->
+<div class="scr hide solid deco" id="sc-hub">
+  <div class="wcol">
+    <h1 class="ttl" id="hubTitle"></h1>
+    <div class="tabs" id="hubTabs"></div>
+    <div class="hubbody" id="hubBody"></div>
+    <div class="hubbtns" id="hubBtns"></div>
+  </div>
+</div>
+
+<!-- Настройки -->
+<div class="scr hide solid" id="sc-settings">
+  <div class="wcol">
+    <h1 class="ttl">Настройки</h1>
+    <div id="langSetting"></div>
+    <div class="tabs" id="setTabs"></div>
+    <div class="hubbody" id="setBody"></div>
+    <div class="tfoot"><button class="mi pri" data-a="setback">Готово</button></div>
+  </div>
+</div>
+
+<!-- Гардероб -->
+<div class="scr hide" id="sc-ward" style="background:linear-gradient(90deg,rgba(5,8,14,.95) 0%,rgba(5,8,14,.84) 55%,rgba(5,8,14,0) 85%)">
+  <div class="col"><div class="in">
+    <h1 class="ttl">Гардероб</h1>
+    <div id="wardBody"></div>
+    <button class="mi pri" data-a="home" style="margin-top:10px">Готово</button>
+  </div></div>
+</div>
+
+<!-- Ultimate Team 2.0 -->
+<div class="scr hide solid deco" id="sc-ut"><div class="wcol uxWrap"><div class="ux" id="uxRoot"></div></div></div>
+<div id="utReveal" class="hide"></div>
+
+<!-- Об авторе -->
+<div class="scr hide solid deco" id="sc-author">
+  <div class="wcol"><div style="margin:auto 0;max-width:560px">
+    <h1 class="logo">COW<em>BALL</em></h1>
+    <div class="sub">Версия <span id="verTxt"></span></div>
+    <p class="help">Автор: <b id="authName"></b></p>
+    <p class="help">Ник: <b id="authHandle"></b></p>
+    <div id="authLinks"></div>
+    <p class="help" style="color:var(--mut)">Сделано с помощью ИИ Claude. Без рекламы, без интернета во время игры (кроме загрузки движка).</p>
+    <button class="mi pri" data-a="home" style="max-width:240px">Назад</button>
+  </div></div>
+</div>
+
+<!-- Как играть -->
+<div class="scr hide solid" id="sc-help">
+  <div class="wcol"><div class="hubbody">
+    <h1 class="ttl">Как играть</h1>
+    <p class="help"><b>Стик слева</b> — бежать. Тронь экран и веди пальцем. На ПК — WASD или стрелки.</p>
+    <p class="help"><b>МУ</b> — удар. Держи кнопку, чтобы ударить сильнее (на ПК — Пробел).</p>
+    <p class="help"><b>ПАС</b> — отдать мяч партнёру (E). <b>НАВЕС</b> — подача в штрафную (R). <b>РЫВОК</b> — бежать быстрее, тратит силы (Shift). <b>⇄</b> — сменить игрока (Q).</p>
+    <p class="help"><b>Бонусы на поле:</b> сено — ускорение, колокольчик — замораживает соперников, молоко — сверхудар.</p>
+    <p class="help">Вратарь — компьютер. С включёнными футбольными правилами появляются офсайды, фолы, карточки, угловые, вбрасывания и удары от ворот. Геймпад поддерживается.</p>
+  </div>
+  <div class="tfoot"><button class="mi pri" data-a="home">Понятно</button></div></div>
+</div>
+
+<!-- Обучение (первый матч) -->
+<div class="scr hide over" id="sc-tut">
+  <div class="panel">
+    <h2>Быстрое обучение</h2>
+    <p class="help" style="text-align:left"><b>1.</b> Веди пальцем слева — корова бежит.<br><b>2.</b> «МУ» — удар, держи для силы.<br><b>3.</b> «ПАС» — отдать партнёру.<br><b>4.</b> «РЫВОК» — ускорение, силы быстро кончаются.<br><b>5.</b> Игрок меняется сам — ты всегда рядом с мячом.</p>
+    <button class="mi pri" data-a="tutok">Понятно, играем</button>
+  </div>
+</div>
+
+<!-- Пауза -->
+<div class="scr hide over" id="sc-pause">
+  <div class="panel">
+    <h2>Пауза</h2>
+    <button class="mi pri" data-a="resume">Продолжить</button>
+    <button class="mi" data-a="pausesettings">Настройки</button>
+    <button class="mi" data-a="substitutions">Замены и усталость</button>
+    <button class="mi" data-a="photoMode">Фоторежим</button>
+    <button class="mi" data-a="restart">Начать заново</button>
+    <button class="mi" data-a="tomenu">В меню</button>
+  </div>
+</div>
+
+<!-- Конец матча -->
+<div class="scr hide over" id="sc-end">
+  <div class="panel">
+    <div id="endBody"></div>
+    <div id="endBtns"></div>
+  </div>
+</div>
+
+<div class="scr hide" id="sc-net"><div class="wcol nxWrap"><div class="ttl">Игра по сети</div><div id="netBody"></div></div></div>
+<div id="brandMark"></div>
+<div id="splash">Cowball · загрузка…</div>
+<div id="rot">Поверни телефон горизонтально</div>
+
+<script src="three-loader.js"></script>
+<script src="cowball-physics.js"></script>
+<script src="cowball-ai.js"></script>
+<script src="cowball-rosters.js"></script>
+<script src="cowball-core.js"></script>
+
+<script src="ui-effects.js"></script>
+
+
+
+
+
+<script src="cowball-v44-navigation.js"></script>
+<script src="cowball-v45-lab.js"></script>
+<script src="cowball-v46-perf.js"></script>
+<script src="cowball-v47-ui.js"></script>
+
+</body>
+</html>

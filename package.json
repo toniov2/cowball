@@ -1,0 +1,10 @@
+{
+  "name": "cowball-online-service",
+  "version": "0.45.0",
+  "private": true,
+  "description": "Optional prototype backend for Cowball profiles, leaderboard, matchmaking queue and WebRTC signaling relay.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "check": "node --check server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" }
+}

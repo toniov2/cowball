@@ -1,0 +1,76 @@
+/* Cowball v46: единый стиль, анимации меню, Ultimate Team и сетевой игры. Только transform/opacity — дёшево для GPU. */
+@keyframes cb46In{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes cb46Pop{0%{transform:scale(.92);opacity:0}60%{transform:scale(1.03);opacity:1}100%{transform:none}}
+@keyframes cb46Glow{0%,100%{box-shadow:0 0 0 0 rgba(184,255,61,0),0 6px 20px rgba(0,0,0,.35)}50%{box-shadow:0 0 22px 2px rgba(184,255,61,.28),0 6px 20px rgba(0,0,0,.35)}}
+@keyframes cb46Sheen{from{transform:translateX(-120%) skewX(-18deg)}to{transform:translateX(260%) skewX(-18deg)}}
+@keyframes cb46Float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+@keyframes cb46Spin{to{transform:rotate(360deg)}}
+@keyframes cb46Pulse{0%{transform:scale(.8);opacity:.7}100%{transform:scale(2.2);opacity:0}}
+
+/* --- общие кнопки и карточки --- */
+.mi,.uxb,.nxB{position:relative;overflow:hidden;transition:transform .16s ease,filter .16s ease,box-shadow .2s ease,border-color .2s ease}
+.mi:hover,.uxb:hover,.nxB:hover{transform:translateY(-2px);filter:brightness(1.1)}
+.mi:active,.uxb:active,.nxB:active{transform:translateY(0) scale(.97);filter:brightness(.95)}
+.mi.pri::after,.uxb.pri::after,.nxB.pri::after{content:"";position:absolute;top:0;bottom:0;left:0;width:34%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.38),transparent);transform:translateX(-120%) skewX(-18deg);animation:cb46Sheen 3.4s ease-in-out infinite;pointer-events:none}
+.mi.pri,.uxb.pri,.nxB.pri{animation:cb46Glow 2.8s ease-in-out infinite}
+
+/* --- Ultimate Team --- */
+#sc-ut .ux>*{animation:cb46In .42s cubic-bezier(.2,.7,.2,1) both}
+#sc-ut .ux>*:nth-child(2){animation-delay:.05s}#sc-ut .ux>*:nth-child(3){animation-delay:.1s}#sc-ut .ux>*:nth-child(4){animation-delay:.15s}
+#sc-ut .uxTabs button{transition:transform .15s,background .2s,color .2s}
+#sc-ut .uxTabs button:hover{transform:translateY(-1px)}
+#sc-ut .uxTile,#sc-ut .uxPack,#sc-ut .uxLot,#sc-ut .uxClub,#sc-ut .uxSlot{animation:cb46Pop .38s cubic-bezier(.2,.8,.2,1) both;transition:transform .18s ease,box-shadow .2s ease,border-color .2s}
+#sc-ut .uxTile:nth-child(2n),#sc-ut .uxPack:nth-child(2n),#sc-ut .uxLot:nth-child(2n){animation-delay:.05s}
+#sc-ut .uxTile:nth-child(3n),#sc-ut .uxPack:nth-child(3n),#sc-ut .uxLot:nth-child(3n){animation-delay:.1s}
+#sc-ut .uxTile:hover,#sc-ut .uxPack:hover,#sc-ut .uxLot:hover,#sc-ut .uxClub:hover{transform:translateY(-4px) scale(1.02);border-color:var(--acc);box-shadow:0 10px 26px rgba(0,0,0,.45),0 0 18px rgba(184,255,61,.16)}
+#sc-ut .uxPack{animation:cb46Pop .38s both,cb46Float 4.5s ease-in-out .5s infinite}
+#sc-ut .uxBar>*,#sc-ut .uxScore{transition:width .5s cubic-bezier(.2,.7,.2,1)}
+#utReveal{animation:cb46In .3s both}
+
+/* --- Игра по сети --- */
+#sc-net .nxWrap>*{animation:cb46In .42s cubic-bezier(.2,.7,.2,1) both}
+#sc-net .nxPanel,#sc-net .nxHero,#sc-net .nxQuick,#sc-net .nxFeat,#sc-net .nxRow{animation:cb46Pop .38s cubic-bezier(.2,.8,.2,1) both;transition:transform .18s,border-color .2s,box-shadow .2s}
+#sc-net .nxPanel:hover,#sc-net .nxQuick:hover,#sc-net .nxFeat:hover{transform:translateY(-3px);border-color:var(--acc);box-shadow:0 10px 24px rgba(0,0,0,.4)}
+#sc-net .nxPanel:nth-child(2n),#sc-net .nxRow:nth-child(2n){animation-delay:.05s}
+#sc-net .nxPanel:nth-child(3n),#sc-net .nxRow:nth-child(3n){animation-delay:.1s}
+#sc-net .nxGlobe{animation:cb46Float 5s ease-in-out infinite}
+#sc-net .nxPing{position:relative}
+#sc-net .nxPing::after{content:"";position:absolute;inset:0;margin:auto;width:10px;height:10px;border-radius:50%;border:2px solid var(--acc);animation:cb46Pulse 1.8s ease-out infinite;pointer-events:none}
+#sc-net .nxWait{animation:cb46Float 2.2s ease-in-out infinite}
+#sc-net .nxIn{transition:border-color .2s,box-shadow .2s}
+#sc-net .nxIn:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(184,255,61,.18);outline:0}
+
+/* --- общий вид экранов (как в остальной игре) --- */
+#sc-ut .ux,#sc-net .nxWrap{font-family:var(--f)}
+#sc-ut .uxPanel,#sc-net .nxPanel{border-radius:var(--radius);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+
+/* --- мягкие подсветки в главном меню --- */
+.tiles>*{transition:transform .18s ease,box-shadow .2s ease}
+.tiles>*:hover{transform:translateY(-3px)}
+
+/* слабые устройства и пользователи с reduce-motion: без бесконечных анимаций */
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important}}
+html.lowfx .mi.pri,html.lowfx .uxb.pri,html.lowfx .nxB.pri,html.lowfx #sc-ut .uxPack,html.lowfx #sc-net .nxGlobe,html.lowfx #sc-net .nxWait{animation:none!important}
+html.lowfx .mi.pri::after,html.lowfx .uxb.pri::after,html.lowfx .nxB.pri::after{display:none}
+
+/* v46 fixes: keep menu animations from replaying after each in-screen control click. */
+.scr.cb-interacted .panel,.scr.cb-interacted .wcol,.scr.cb-interacted .col>.in,
+.scr.cb-interacted :is(.opt,.mrow,.korow,.utPanel,.utStat,.trophy,.tc,.cc,.lf,.stats tr,.tb tr),
+.scr.cb-interacted #netBody>*,
+.scr.cb-interacted .uxBody.ani :is(.uxTile,.uxPanel,.uxPack,.uxObj,.uxCw,.uxLot,.uxHero){animation:none!important;filter:none!important}
+
+/* Saved touch-button positions use the full viewport while retaining the size slider. */
+#tbtns.custom-layout{position:fixed!important;inset:0!important;left:0!important;right:0!important;bottom:auto!important;width:auto!important;height:auto!important;z-index:60}
+#tbtns.custom-layout .tbtn{position:fixed!important;left:calc(var(--cx,50)*1vw)!important;top:calc(var(--cy,50)*1vh)!important;right:auto!important;bottom:auto!important;transform:translate(-50%,-50%)!important}
+#tbtns.custom-layout .tbtn.on{transform:translate(-50%,-50%) scale(.94)!important}
+#tbtns.custom-layout .tbtn:hover{transform:translate(-50%,-50%) translateY(-2px)!important}
+
+/* Layout editor: the underlying settings are dimmed and inert; only drag targets and bar accept input. */
+html.controls-editor-open #tbtns{display:block!important;position:fixed!important;inset:0!important;left:0!important;right:0!important;bottom:auto!important;width:auto!important;height:auto!important;opacity:1!important;z-index:2001!important}
+html.controls-editor-open #tbtns .tbtn{z-index:2002!important;cursor:grab}
+html.controls-editor-open #tbtns .tbtn:active{cursor:grabbing}
+#controlsEditorV46{position:fixed;inset:0;background:rgba(4,8,20,.76);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:2000;pointer-events:auto}
+.controlsEditorBarV46{position:absolute;z-index:2003;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(760px,calc(100% - 24px));display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid rgba(255,255,255,.18);border-radius:16px;background:rgba(14,21,38,.96);box-shadow:0 12px 36px rgba(0,0,0,.4);color:#fff}
+.controlsEditorBarV46>div{flex:1;min-width:0}.controlsEditorBarV46 b{display:block;font-size:14px}.controlsEditorBarV46 small{display:block;margin-top:3px;color:rgba(255,255,255,.72);font-size:11px}
+.controlsEditorBarV46 .mi{white-space:nowrap;min-height:40px}
+@media(max-width:520px){.controlsEditorBarV46{flex-wrap:wrap}.controlsEditorBarV46>div{flex-basis:100%}.controlsEditorBarV46 .mi{flex:1}}

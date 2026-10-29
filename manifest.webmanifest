@@ -1,0 +1,19 @@
+{
+  "name": "Cowball Online & Career Edition",
+  "short_name": "Cowball",
+  "description": "Футбольная игра Cowball: матчи, турниры, карьера, Ultimate Team и онлайн.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#070b12",
+  "theme_color": "#070b12",
+  "icons": [
+    {
+      "src": "cowball-icon.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
