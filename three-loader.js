@@ -1,3 +1,8 @@
+/* v50: shared error log. Swallowed errors are no longer invisible: they are kept in window.__cbErrors (last 50) and printed with console.debug. */
+window.__cbErrors = window.__cbErrors || [];
+window.__cbLog = function (err) {
+  try { window.__cbErrors.push({ t: Date.now(), m: String(err && (err.stack || err.message) || err).slice(0, 300) }); if (window.__cbErrors.length > 50) window.__cbErrors.shift(); console.debug('[cowball]', err); } catch (_) {}
+};
 (function () {
   // A failed or stalled Three.js request must never leave the splash screen hanging forever.
   var finished = false;
