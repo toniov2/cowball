@@ -1,0 +1,30 @@
+/* Cowball v49 — ceremony overlay (opening / closing). Canvas is drawn by cowball-v49-ceremony.js */
+#cbCeremony{position:fixed;inset:0;z-index:5000;background:#03050a;color:#fff;overflow:hidden;font-family:Inter,system-ui,sans-serif;opacity:1;transition:opacity .5s ease;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+#cbCeremony.out{opacity:0;pointer-events:none}
+#cbCeremony .cbcCanvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#cbCeremony .cbcVig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 45%,rgba(0,0,0,.65) 100%)}
+#cbCeremony .cbcFlash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;mix-blend-mode:screen}
+#cbCeremony .cbcBar{position:absolute;left:0;right:0;height:7vh;background:#000;pointer-events:none}
+#cbCeremony .cbcBarT{top:0}#cbCeremony .cbcBarB{bottom:0}
+#cbCeremony .cbcTitle{position:absolute;left:0;right:0;top:calc(9vh + env(safe-area-inset-top,0px));text-align:center;padding:0 16px;pointer-events:none}
+#cbCeremony .cbcKick{font:700 clamp(12px,2.4vw,18px)/1.2 Inter,sans-serif;letter-spacing:.32em;text-transform:uppercase;color:#ffd36a;opacity:0;transform:translateY(-8px);transition:opacity .9s ease,transform .9s ease}
+#cbCeremony .cbcHead{margin:.35em 0 0;font:900 clamp(22px,5.4vw,56px)/1.08 Unbounded,Inter,sans-serif;letter-spacing:.04em;text-shadow:0 4px 28px rgba(0,0,0,.8),0 0 40px rgba(255,200,90,.35);opacity:0;transform:scale(1.08);transition:opacity 1s ease,transform 1.2s cubic-bezier(.2,.8,.2,1),font-size .8s ease}
+#cbCeremony .cbcHead.small{font-size:clamp(16px,3.2vw,32px)}
+#cbCeremony .cbcSub{margin:.6em 0 0;font:700 clamp(13px,2.6vw,22px)/1.3 Inter,sans-serif;letter-spacing:.14em;color:#e6eefc;text-shadow:0 2px 14px #000;opacity:0;transition:opacity .9s ease}
+#cbCeremony .cbcSub.go{font-family:Unbounded,Inter,sans-serif;font-weight:900;font-size:clamp(18px,4.2vw,40px);color:#ffd36a;letter-spacing:.08em}
+#cbCeremony .on{opacity:1!important;transform:none!important}
+#cbCeremony .cbcCards{position:absolute;left:max(14px,env(safe-area-inset-left,0px));top:58%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:flex-start;gap:10px;pointer-events:none;max-width:42vw}
+#cbCeremony .cbcCard{display:flex;align-items:center;gap:10px;padding:8px 14px;border-radius:14px;background:rgba(8,12,22,.72);border:1px solid color-mix(in srgb,var(--c) 70%,#fff 10%);box-shadow:0 6px 24px rgba(0,0,0,.5),inset 0 0 18px color-mix(in srgb,var(--c) 30%,transparent);animation:cbcIn .7s cubic-bezier(.2,.9,.2,1) both;backdrop-filter:blur(6px)}
+#cbCeremony .cbcCard i{font-style:normal;font-size:clamp(20px,3.4vw,30px)}
+#cbCeremony .cbcCard div{min-width:0}
+#cbCeremony .cbcCard b{display:block;overflow-wrap:anywhere;font:800 clamp(13px,2.4vw,19px)/1.15 Inter,sans-serif}
+#cbCeremony .cbcCard small{display:block;font:600 clamp(10px,1.8vw,13px)/1.2 Inter,sans-serif;opacity:.75;letter-spacing:.08em;text-transform:uppercase}
+#cbCeremony .cbcChamp{position:absolute;left:0;right:0;bottom:calc(9.5vh + env(safe-area-inset-bottom,0px));text-align:center;padding:0 12px;opacity:0;transform:translateY(24px) scale(.96);transition:opacity .9s ease,transform 1s cubic-bezier(.2,.9,.2,1);pointer-events:none}
+#cbCeremony .cbcChamp small{display:block;font:900 clamp(15px,3.6vw,36px)/1.1 Unbounded,Inter,sans-serif;letter-spacing:.14em;color:#ffd36a;text-shadow:0 0 30px rgba(255,200,80,.7),0 4px 18px #000}
+#cbCeremony .cbcChamp b{display:block;margin-top:.15em;font:900 clamp(18px,4.6vw,50px)/1.05 Unbounded,Inter,sans-serif;color:#fff;text-shadow:0 0 36px var(--c),0 4px 22px #000}
+#cbCeremony .cbcChamp em{display:block;margin-top:.4em;font:600 clamp(11px,2vw,16px)/1.3 Inter,sans-serif;font-style:normal;letter-spacing:.12em;opacity:.85;text-transform:uppercase}
+#cbCeremony .cbcSkip{position:absolute;right:max(14px,env(safe-area-inset-right,0px));top:max(12px,env(safe-area-inset-top,0px));z-index:3;border:1px solid rgba(255,255,255,.35);background:rgba(8,12,22,.6);color:#fff;border-radius:999px;padding:9px 16px;font:700 13px Inter,sans-serif;letter-spacing:.06em;cursor:pointer;backdrop-filter:blur(6px);min-height:40px}
+#cbCeremony .cbcSkip:hover{background:rgba(255,255,255,.18)}
+@keyframes cbcIn{from{opacity:0;transform:translateY(14px) scale(.94)}to{opacity:1;transform:none}}
+@media (max-height:430px){#cbCeremony .cbcBar{height:4vh}#cbCeremony .cbcTitle{top:6vh}#cbCeremony .cbcChamp{bottom:6vh}#cbCeremony .cbcChamp em{display:none}}
+@media (prefers-reduced-motion:reduce){#cbCeremony{display:none}}

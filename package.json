@@ -1,10 +1,46 @@
 {
   "name": "cowball-online-service",
-  "version": "0.45.0",
+  "version": "0.51.0",
   "private": true,
   "description": "Optional prototype backend for Cowball profiles, leaderboard, matchmaking queue and WebRTC signaling relay.",
   "main": "server.js",
-  "scripts": { "start": "node server.js", "check": "node --check server.js" },
-  "engines": { "node": ">=18" },
-  "dependencies": { "ws": "^8.18.0" }
+  "scripts": {
+    "start": "node server.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test:phase0": "python3 tests/run_phase0.py",
+    "check": "node tools_check_syntax.js",
+    "test": "npm run typecheck && npm run lint && npm run test:unit && npm run build && npm run test:e2e"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "i18next": "^27.0.1",
+    "ws": "^8.18.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^26.6.6",
+    "@types/three": "^0.128.0",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.8",
+    "fake-indexeddb": "^6.2.8",
+    "jsdom": "^31.0.0",
+    "prettier": "^3.9.10",
+    "three": "^0.128.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vite": "^8.3.7",
+    "vitest": "^5.1.0"
+  }
 }

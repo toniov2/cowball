@@ -22,12 +22,21 @@ const profileSockets = new Map();
 let persistTimer = null;
 let db = { profiles: {}, friends: {}, tournaments: [] };
 
+// v50: CORS is no longer '*'. Set COWBALL_ORIGINS="https://user.github.io,https://example.com" for your site; localhost is always allowed for development.
+const ALLOWED_ORIGINS = String(process.env.COWBALL_ORIGINS || '').split(',').map(x => x.trim().replace(/\/$/, '')).filter(Boolean);
+function allowedOrigin(req) {
+  const o = String(req.headers.origin || '').replace(/\/$/, '');
+  if (!o) return '';
+  if (ALLOWED_ORIGINS.includes(o) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o)) return o;
+  return '';
+}
+function corsHeaders(origin) { const h = { 'Vary': 'Origin', 'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }; if (origin) h['Access-Control-Allow-Origin'] = origin; return h; }
 function clamp(n, lo, hi) { n = Number(n); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : lo; }
 function cleanText(v, max = 32) { return String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max); }
 function validId(v) { const id = String(v || ''); return /^[a-zA-Z0-9._:-]{3,100}$/.test(id) ? id : ''; }
 function json(res, status, value) {
   const body = JSON.stringify(value);
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+  res.writeHead(status, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body), 'Cache-Control': 'no-store' }, corsHeaders(res.cbOrigin)));
   res.end(body);
 }
 function readBody(req) {
@@ -72,10 +81,11 @@ function broadcastLeaderboard() {
   for (const peer of wss.clients) if (peer.readyState === WebSocket.OPEN) peer.send(packet);
 }
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); return res.end(); }
+  res.cbOrigin = allowedOrigin(req);
+  if (req.method === 'OPTIONS') { res.writeHead(res.cbOrigin ? 204 : 403, corsHeaders(res.cbOrigin)); return res.end(); }
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
-    if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, service: 'Cowball Online Service', version: '0.45.0', profiles: Object.keys(db.profiles).length, matchmakingQueue: queues.size, time: new Date().toISOString() });
+    if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, service: 'Cowball Online Service', version: '0.50.0', profiles: Object.keys(db.profiles).length, matchmakingQueue: queues.size, time: new Date().toISOString() });
     if (req.method === 'GET' && url.pathname === '/api/leaderboard') return json(res, 200, { items: leaderboard(Math.max(1, Math.min(100, Number(url.searchParams.get('limit')) || 50))) });
     let match = url.pathname.match(/^\/api\/profile\/([^/]+)$/);
     if (match) {

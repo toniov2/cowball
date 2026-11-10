@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#070b12">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -14,9 +14,6 @@
   2) manifest и иконка приложения включены; автономный offline-cache не включён, потому что Three.js пока загружается с CDN;
   3) прогресс игры сохраняется в localStorage; необязательный backend-шаблон — server.js.
 -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Unbounded:wght@500;700;800;900&display=swap&subset=cyrillic" rel="stylesheet">
 
 
 <link rel="icon" type="image/png" href="cowball-icon.png">
@@ -30,6 +27,7 @@
 <link rel="stylesheet" href="cowball-v45.css">
 <link rel="stylesheet" href="cowball-v46.css">
 <link rel="stylesheet" href="cowball-v47-ui.css">
+<link rel="stylesheet" href="cowball-v49-ceremony.css">
 </head>
 <body>
 <canvas id="gl"></canvas>
@@ -223,6 +221,21 @@
 <script src="cowball-v45-lab.js"></script>
 <script src="cowball-v46-perf.js"></script>
 <script src="cowball-v47-ui.js"></script>
+<script src="cowball-v49-ceremony.js"></script>
+<script src="cowball-v50-a11y.js"></script>
+<!-- v51: Phase 1 scaffold (Vite + TypeScript). Module scripts run after the classic scripts above. -->
+<script type="module" src="/src/main.ts"></script>
+<script>
+/* v50: offline support. Service workers need https or localhost; elsewhere the game simply runs online as before. */
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      var warm = function () { var w = reg.active; if (w) w.postMessage({ type: 'warm' }); };
+      if (reg.active) setTimeout(warm, 3000); else navigator.serviceWorker.ready.then(function () { setTimeout(warm, 3000); });
+    }).catch(function () {});
+  });
+}
+</script>
 
 </body>
 </html>

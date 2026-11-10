@@ -11,7 +11,7 @@
   const tr = key => (T[lang]||T.ru)[key] || T.ru[key] || key;
   function profileId(){try{let id=localStorage.getItem('cowball_v45_profile_id');if(!id){id=(crypto&&crypto.randomUUID)?crypto.randomUUID():'cb-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);localStorage.setItem('cowball_v45_profile_id',id);}return id;}catch(_){return 'guest-'+Math.random().toString(36).slice(2);}}
   const localServerUrl=()=>{try{return localStorage.getItem('cowball_v45_server_url')||'';}catch(_){return '';}};
-  const saveServerUrl=v=>{try{localStorage.setItem('cowball_v45_server_url',v);}catch(_){}};
+  const saveServerUrl=v=>{try{localStorage.setItem('cowball_v45_server_url',v);}catch (_) { window.__cbLog && window.__cbLog(_); }};
   function mount(){
     if(byId('cbV45LabButton'))return;
     const btn=document.createElement('button');btn.id='cbV45LabButton';btn.type='button';btn.innerHTML='<span class="cbV45Dot"></span> ⚡ Cowball v45';btn.addEventListener('click',show);document.body.appendChild(btn);

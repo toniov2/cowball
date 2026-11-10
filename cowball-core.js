@@ -11,7 +11,11 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const norm = (x, y) => { const m = Math.hypot(x, y) || 1; return [x / m, y / m]; };
-const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+// v50: seeded RNG (mulberry32) for tournament simulation. Seeded randomly at start, so normal play is unchanged; tests/servers can call seedRngV50(n) for reproducible results.
+let rngStateV50 = (Math.random() * 4294967296) >>> 0;
+const rngV50 = () => { rngStateV50 = (rngStateV50 + 0x6D2B79F5) >>> 0; let t = rngStateV50; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const seedRngV50 = n => { rngStateV50 = (Number(n) >>> 0) || 1; };
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rngV50() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const hex = n => '#' + n.toString(16).padStart(6, '0');
 const IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
@@ -67,10 +71,10 @@ try {
       const parsedBackup = JSON.parse(rawBackup);
       if (!parsedBackup || typeof parsedBackup !== 'object' || Array.isArray(parsedBackup)) continue;
       Object.assign(settings, parsedBackup);
-      try { localStorage.setItem('cowball', JSON.stringify(parsedBackup)); } catch (_) {}
+      try { localStorage.setItem('cowball', JSON.stringify(parsedBackup)); } catch (_) { window.__cbLog && window.__cbLog(_); }
       cowballRecoveredV31 = true;
       break;
-    } catch (_) {}
+    } catch (_) { window.__cbLog && window.__cbLog(_); }
   }
 }
 window.__cowballRecoveredV31 = cowballRecoveredV31;
@@ -124,7 +128,26 @@ settings.kitTemplates = settings.kitTemplates.slice(0, 8).map((x, i) => ({ name:
 settings.activeFormTemplate = clamp(Number(settings.activeFormTemplate) || 0, 0, settings.kitTemplates.length - 1);
 settings.localRecords = settings.localRecords.filter(r => r && typeof r === 'object').slice(0, 100);
 let saveT = 0;
-function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('cowball', JSON.stringify(settings)); } catch (e) {} }, 150); }
+const SAVE_SAFETY_KEYS_V50 = ['cowball_backup_v31', 'cowball_preimport_v31', 'cowball_pre_restore_v31'];
+let saveWarnAtV50 = 0;
+function warnSaveFailedV50(err) {
+  window.__cowballSaveFailed = true; if (window.__cbLog) window.__cbLog(err);
+  if (Date.now() - saveWarnAtV50 < 60000) return; saveWarnAtV50 = Date.now();
+  let el = document.getElementById('cbSaveWarn');
+  if (!el) { el = document.createElement('div'); el.id = 'cbSaveWarn'; el.setAttribute('role', 'alert');
+    el.style.cssText = 'position:fixed;left:50%;top:max(12px,env(safe-area-inset-top));transform:translateX(-50%);z-index:99999;max-width:min(92vw,520px);padding:12px 16px;border-radius:12px;background:#7a1020;color:#fff;font:600 14px/1.4 system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.5);text-align:center';
+    document.body.appendChild(el); }
+  el.textContent = 'Не удалось сохранить прогресс: память браузера заполнена или недоступна. Сделай экспорт сохранения в настройках и освободи место.';
+  el.style.display = 'block'; clearTimeout(el._t); el._t = setTimeout(() => { el.style.display = 'none'; }, 9000);
+}
+function save() { clearTimeout(saveT); saveT = setTimeout(() => {
+  const payload = JSON.stringify(settings);
+  try { localStorage.setItem('cowball', payload); window.__cowballSaveFailed = false; try { const h = window.CowballV2Hook; if (h && h.onSave) h.onSave(payload); } catch (_) {} return; } catch (e) { var firstErr = e; }
+  // Most likely the quota is full because of the safety copies: drop them (the main save is what matters) and retry once.
+  try { SAVE_SAFETY_KEYS_V50.forEach(k => localStorage.removeItem(k)); localStorage.setItem('cowball', payload); window.__cowballSaveFailed = false; try { const h = window.CowballV2Hook; if (h && h.onSave) h.onSave(payload); } catch (_) {} return; } catch (e2) { window.__cbLog && window.__cbLog(e2); }
+  try { const h = window.CowballV2Hook; if (h && h.onSave) h.onSave(payload); } catch (_) {}   // v51: IndexedDB mirror still keeps the save when localStorage is full
+  warnSaveFailedV50(firstErr);
+}, 150); }
 // Keep the previous valid save before replacing it. If storage is full, normal saving still proceeds.
 const saveV31Base = save;
 save = function () {
@@ -343,7 +366,7 @@ TEAMS.forEach(t => { if (t.nation) t.flag = NATION_FLAGS[t.code] || '🏳️'; }
   const ENGL = { ENG:{en:'England',fr:'Angleterre',es:'Inglaterra',tr:'İngiltere',az:'İngiltərə'}, SCO:{en:'Scotland',fr:'Écosse',es:'Escocia',tr:'İskoçya',az:'Şotlandiya'}, WAL:{en:'Wales',fr:'Pays de Galles',es:'Gales',tr:'Galler',az:'Uels'} };
   window.applyTeamNames = function () {
     const lg = (settings && settings.lang) || 'ru'; let dn = null;
-    if (lg !== 'ru') { try { dn = new Intl.DisplayNames([lg], { type: 'region' }); } catch (e) {} }
+    if (lg !== 'ru') { try { dn = new Intl.DisplayNames([lg], { type: 'region' }); } catch (e) { window.__cbLog && window.__cbLog(e); } }
     TEAMS.forEach(tm => {
       if (tm._ru === undefined) tm._ru = tm.name;
       let n = tm._ru;
@@ -351,7 +374,7 @@ TEAMS.forEach(t => { if (t.nation) t.flag = NATION_FLAGS[t.code] || '🏳️'; }
         if (tm._en) n = tm._en;
         else if (tm.nation) {
           if (ENGL[tm.code]) n = ENGL[tm.code][lg] || n;
-          else if (dn && tm.flag) { const cp = Array.from(tm.flag).map(c => c.codePointAt(0)); if (cp.length === 2 && cp[0] >= 0x1F1E6 && cp[0] <= 0x1F1FF) { try { n = dn.of(String.fromCharCode(cp[0] - 0x1F1E6 + 65, cp[1] - 0x1F1E6 + 65)) || n; } catch (e) {} } }
+          else if (dn && tm.flag) { const cp = Array.from(tm.flag).map(c => c.codePointAt(0)); if (cp.length === 2 && cp[0] >= 0x1F1E6 && cp[0] <= 0x1F1FF) { try { n = dn.of(String.fromCharCode(cp[0] - 0x1F1E6 + 65, cp[1] - 0x1F1E6 + 65)) || n; } catch (e) { window.__cbLog && window.__cbLog(e); } } }
         }
       }
       tm.name = n;
@@ -499,7 +522,7 @@ function init() {
     src.start();
     const lfo = ctx.createOscillator(); lfo.frequency.value = 0.23; const lg = ctx.createGain(); lg.gain.value = 0.02;
     lfo.connect(lg); lg.connect(crowdGain.gain); lfo.start();
-    setInterval(() => { if (crowdGain) crowdGain.gain.setTargetAtTime(crowdTarget, ctx.currentTime, 0.4); }, 250);
+    if (!window.__cbCrowdTimer) window.__cbCrowdTimer = setInterval(() => { if (crowdGain && ctx) crowdGain.gain.setTargetAtTime(crowdTarget, ctx.currentTime, 0.4); }, 250);   // v50: never more than one
   }
   // level 0..1 — «накал» на трибунах; 0 — тишина (меню)
   function crowd(level) { crowdBase = level <= 0 ? 0 : 0.03 + 0.17 * level; if (Date.now() > swellT) crowdTarget = crowdBase; }
@@ -636,6 +659,7 @@ const SFX = Audio_.sfx;
 
 // ================== Three.js: сцена ==================
 const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: true, powerPreference: 'high-performance', alpha: false });
+window.CowballV2Hook = window.CowballV2Hook || {}; window.CowballV2Hook.renderer = renderer;   // v51: Phase 1 bridge (profiler reads renderer.info)
 renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.LinearToneMapping; renderer.toneMappingExposure = 0.9;   // ACES обесцвечивал картинку
 // Качественные real-time тени от направленного света и стадионных прожекторов.
 renderer.shadowMap.enabled = true; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true; let shadowTick = 0;   // тени обновляем по расписанию, а не каждый кадр
@@ -776,7 +800,7 @@ for (let i = 0; i < 12; i++) {
       tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
       stripeMats.forEach(m => { m.map = tex; m.needsUpdate = true; });
     }, undefined, () => {});
-  } catch (_) {}
+  } catch (_) { window.__cbLog && window.__cbLog(_); }
 })();
 
 // Крупные неровные пятна «стрижки» поверх полос: разные оттенки зелёного без тяжёлых шейдеров.
@@ -885,7 +909,7 @@ const LOGO_SVG = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'>
 try {
   document.documentElement.style.setProperty('--logoimg', 'url("data:image/svg+xml;utf8,' + LOGO_SVG + '")');
   let ic = document.querySelector('link[rel~="icon"]'); if (!ic) { ic = document.createElement('link'); ic.rel = 'icon'; document.head.appendChild(ic); } ic.href = 'data:image/svg+xml;utf8,' + LOGO_SVG;
-} catch (e) {}
+} catch (e) { window.__cbLog && window.__cbLog(e); }
 const AD_BRANDS = [
   ['МОЛОЧНАЯ ЛИГА', '🥛', '#ffffff', '#1565c0'], ['СЕНО+', '🌾', '#1b1b1b', '#ffd54f'], ['МУУУ-БАНК', '💳', '#ffffff', '#2e7d32'], ['ТРАВКА-COLA', '🥤', '#ffffff', '#d32f2f'],
   ['БУРЁНКА МОБАЙЛ', '📱', '#ffffff', '#7b1fa2'], ['РОГА & КОПЫТА', '🐂', '#ffffff', '#e65100'], ['СЫРНЫЙ ДОМ', '🧀', '#3e2723', '#ffca28'], ['КОЛОКОЛЬЧИК TV', '🔔', '#ffffff', '#00838f'],
@@ -986,13 +1010,13 @@ const SPEC_ACC = ['none', 'none', 'cap', 'cap', 'beanie', 'glasses', 'sombrero',
 const specHeads = Array.from({ length: 36 }, (_, i) => { const fi = i % SPEC_FUR.length; return { fi, geo: specHeadGeo(fi, SPEC_HORN[(Math.random() * 4) | 0], SPEC_ACC[(Math.random() * SPEC_ACC.length) | 0], (Math.random() * 8) | 0) }; });
 const spectators = []; let standRoot = null, specSets = null, specTick = 0;
 const standM = M(0x2c3a66), roofM = M(0x2b3345), ledM = new THREE.MeshBasicMaterial({ color: 0xfff2c8 }), seatMats = [];
-try { new THREE.TextureLoader().load('stadium-concrete.png', tx => { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(2, 2); tx.encoding = THREE.sRGBEncoding; tx.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); standM.map = tx; standM.needsUpdate = true; }, undefined, () => {}); } catch (_) {}
+try { new THREE.TextureLoader().load('stadium-concrete.png', tx => { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(2, 2); tx.encoding = THREE.sRGBEncoding; tx.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); standM.map = tx; standM.needsUpdate = true; }, undefined, () => {}); } catch (_) { window.__cbLog && window.__cbLog(_); }
 const seatTexBase = (() => {   // сиденья: цветные секции вместо голого серого бетона
   const c = document.createElement('canvas'); c.width = 256; c.height = 32; const g = c.getContext('2d'), pal = ['#d8333a', '#2a67d8', '#f2c200', '#f4f4f4', '#2aa84a', '#ff7a1a'];
   g.fillStyle = '#222a3a'; g.fillRect(0, 0, 256, 32);
   for (let sec = 0; sec < 4; sec++) { g.fillStyle = pal[(Math.random() * pal.length) | 0]; for (let x = 0; x < 64; x += 8) for (let y = 2; y < 32; y += 10) g.fillRect(sec * 64 + x + 1, y, 6, 7); }
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.encoding = THREE.sRGBEncoding;
-  try { const im = new Image(); im.onload = () => { t.image = im; t.needsUpdate = true; seatMats.forEach(sm => { if (sm.map) { sm.map.image = im; sm.map.needsUpdate = true; } }); }; im.src = 'stadium-seats.png'; } catch (_) {}
+  try { const im = new Image(); im.onload = () => { t.image = im; t.needsUpdate = true; seatMats.forEach(sm => { if (sm.map) { sm.map.image = im; sm.map.needsUpdate = true; } }); }; im.src = 'stadium-seats.png'; } catch (_) { window.__cbLog && window.__cbLog(_); }
   return t;
 })();
 function buildStand(root, cx, cz, rotY, len, steps, fill, roof) {
@@ -1141,7 +1165,7 @@ function refreshSpectatorTeams(tA, tB) {
 
 // ================== Коровы-игроки (у каждой команды своя «фишка») ==================
 const matCow = new THREE.MeshLambertMaterial({ vertexColors: true });
-try { new THREE.TextureLoader().load('kit-weave.png', tx => { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.encoding = THREE.sRGBEncoding; tx.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); matCow.map = tx; matCow.needsUpdate = true; }, undefined, () => {}); } catch (_) {}
+try { new THREE.TextureLoader().load('kit-weave.png', tx => { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.encoding = THREE.sRGBEncoding; tx.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); matCow.map = tx; matCow.needsUpdate = true; }, undefined, () => {}); } catch (_) { window.__cbLog && window.__cbLog(_); }
 const matGlass = new THREE.MeshLambertMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.28 });
 const cowCache = {};
 // v24: rounded-edge box used by cow models and spectators. Faces stay stylized, but corners/normals are softened.
@@ -1291,7 +1315,7 @@ const refLegs = [], refArms = [];
 // ================== Мяч ==================
 const BRW = BR * S, BVIS = 0.92, ballMesh = new THREE.Group();
 const ballBaseMat = new THREE.MeshLambertMaterial({ color: 0xffffff }), ballPatchMat = new THREE.MeshBasicMaterial({ color: 0x1b1b1b, side: THREE.DoubleSide });
-try { new THREE.TextureLoader().load('ball-pebble.png', tx => { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.encoding = THREE.sRGBEncoding; tx.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); ballBaseMat.map = tx; ballBaseMat.needsUpdate = true; }, undefined, () => {}); } catch (_) {}
+try { new THREE.TextureLoader().load('ball-pebble.png', tx => { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.encoding = THREE.sRGBEncoding; tx.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); ballBaseMat.map = tx; ballBaseMat.needsUpdate = true; }, undefined, () => {}); } catch (_) { window.__cbLog && window.__cbLog(_); }
 ballMesh.userData.fieldDynamic = true; ballMesh.add(new THREE.Mesh(new THREE.SphereGeometry(BRW, 24, 18), ballBaseMat));
 {
   const phi = (1 + Math.sqrt(5)) / 2, dirs = [[0,1,phi],[0,-1,phi],[0,1,-phi],[0,-1,-phi],[1,phi,0],[-1,phi,0],[1,-phi,0],[-1,-phi,0],[phi,0,1],[-phi,0,1],[phi,0,-1],[-phi,0,-1]];
@@ -1555,7 +1579,7 @@ const FORM = {
 const sPan = x => clamp((x - W / 2) / (W / 2) * 0.8, -0.8, 0.8);
 const dBall = c => Math.hypot(ball.x - c.x, ball.y - c.y);
 const canPassFrom = c => !!c && (ball.carrier === c || ball.holder === c || (!ball.holder && dBall(c) <= CR + BR + 40));
-function setState(s) { const wasMenu = state === 'menu'; state = s; applyUIState(); if ((s === 'menu') !== wasMenu) { applyRes(); if (wasMenu) fpsAvg = settings.fpsCap || 60; } }
+function setState(s) { const wasMenu = state === 'menu'; const prevV51 = state; state = s; try { const h = window.CowballV2Hook; if (h && h.onState) h.onState(prevV51, s); } catch (_) {} applyUIState(); if ((s === 'menu') !== wasMenu) { applyRes(); if (wasMenu) fpsAvg = settings.fpsCap || 60; } }
 
 // ================== Подготовка матча ==================
 function buildMatch(cfg) {
@@ -1810,7 +1834,7 @@ function openTouchControlEditorV46() {
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
     const r=el.getBoundingClientRect();
     controlsDragV46={id:el.id,pointerId:e.pointerId,dx:e.clientX-(r.left+r.width/2),dy:e.clientY-(r.top+r.height/2)};
-    try{el.setPointerCapture(e.pointerId);}catch(_){}
+    try{el.setPointerCapture(e.pointerId);}catch (_) { window.__cbLog && window.__cbLog(_); }
   };
   const onMove = e => {
     if(!controlsDragV46||e.pointerId!==controlsDragV46.pointerId)return;
@@ -1857,7 +1881,7 @@ function applyControlsLayout() {
 }
 function bindBtn(id, name) {
   const el = $(id);
-  el.addEventListener('pointerdown', e => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) {} Audio_.init(); touch[name] = true; if (name !== 'sprint') touch[name + 'L'] = true; el.classList.add('on'); });
+  el.addEventListener('pointerdown', e => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) { window.__cbLog && window.__cbLog(_); } Audio_.init(); touch[name] = true; if (name !== 'sprint') touch[name + 'L'] = true; el.classList.add('on'); });
   const up = e => { touch[name] = false; el.classList.remove('on'); };
   el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up);
 }
@@ -2776,8 +2800,11 @@ function stepIntro(dt) {
   if (T >= I.P3) { if (!ev.e) { ev.e = 1; bannerEl().innerHTML = ''; } const n = Math.max(1, Math.ceil((I.TOT - T) / 50)); if (n !== lastCount) { lastCount = n; SFX.beep(false); } setCenter(String(n)); if (T >= I.TOT) startKickoff(); } else setCenter('');
 }
 // --- завершение матча: три свистка, рукопожатия, празднование победителя ---
+const outroTimersV50 = [];
+function outroTimerV50(fn, ms) { const id = setTimeout(() => { const k = outroTimersV50.indexOf(id); if (k >= 0) outroTimersV50.splice(k, 1); fn(); }, ms); outroTimersV50.push(id); return id; }
+function cancelOutroTimersV50() { while (outroTimersV50.length) clearTimeout(outroTimersV50.pop()); }
 function beginOutro() {
-  setCenter(''); assignLk(); SFX.whistle(0.9); setTimeout(() => SFX.whistle(0.9), 450); setTimeout(() => SFX.whistle(1.2), 900);
+  cancelOutroTimersV50(); setCenter(''); assignLk(); SFX.whistle(0.9); outroTimerV50(() => { if (state === 'outro') SFX.whistle(0.9); }, 450); outroTimerV50(() => { if (state === 'outro') SFX.whistle(1.2); }, 900);
   Audio_.crowd(0.5); ball.carrier = null; ball.holder = null; outroT = 0; outroGreet = false; outroCheer = false;
   outroWinner = score[0] === score[1] ? -1 : (score[0] > score[1] ? 0 : 1);
   cows.forEach(c => { c.ox = c.x; c.oy = c.y; c.faceAng = undefined; c.ctrl = null; });
@@ -2824,7 +2851,7 @@ function afterGoal() {
 function endMatch() { beginOutro(); }
 function finishMatchNow() {
   setCenter(''); bannerEl().innerHTML = ''; introEv = {}; cows.forEach(c => { c.faceAng = undefined; }); Audio_.crowd(0.2); settings.played++; if (!matchCfg.versus) settings.goals += score[0];
-  try { const a = matchCfg.tA.id, b = matchCfg.tB.id, k = [a, b].sort().join('|'), h = settings.h2h || (settings.h2h = {}), r = h[k] || (h[k] = {}); if (score[0] > score[1]) r[a] = (r[a] | 0) + 1; else if (score[1] > score[0]) r[b] = (r[b] | 0) + 1; else r.d = (r.d | 0) + 1; } catch (e) {}
+  try { const a = matchCfg.tA.id, b = matchCfg.tB.id, k = [a, b].sort().join('|'), h = settings.h2h || (settings.h2h = {}), r = h[k] || (h[k] = {}); if (score[0] > score[1]) r[a] = (r[a] | 0) + 1; else if (score[1] > score[0]) r[b] = (r[b] | 0) + 1; else r.d = (r.d | 0) + 1; } catch (e) { window.__cbLog && window.__cbLog(e); }
   save();
   setState('end'); onMatchEnd({ score: score.slice(), stats, cfg: matchCfg });
 }
@@ -3026,15 +3053,15 @@ const COMPS = {
   league_seriea: { name: 'Серия A', icon: '🌑', theme: 'th-world', desc: '4 топ-клуба Италии' },
   league_ligue1: { name: 'Лига 1', icon: '🚀', theme: 'th-cup', desc: '4 топ-клуба Франции' }
 };
-function poisson(l) { const L = Math.exp(-l); let k = 0, p = 1; do { k++; p *= Math.random(); } while (p > L && k < 12); return k - 1; }
+function poisson(l) { const L = Math.exp(-l); let k = 0, p = 1; do { k++; p *= rngV50(); } while (p > L && k < 12); return k - 1; }
 function simScore(a, b) {
   const A = teamPower(teamById(a)), B = teamPower(teamById(b));
   return { ga: Math.min(6, poisson(1.25 * Math.pow(A / B, 0.9))), gb: Math.min(6, poisson(1.25 * Math.pow(B / A, 0.9))) };
 }
 function simPens(a, b) {
   const pa0 = 0.72 + 0.03 * (teamById(a).pow - 3), pb0 = 0.72 + 0.03 * (teamById(b).pow - 3);
-  let pa = 0, pb = 0; for (let i = 0; i < 5; i++) { if (Math.random() < pa0) pa++; if (Math.random() < pb0) pb++; }
-  let n = 0; while (pa === pb && n++ < 30) { if (Math.random() < pa0) pa++; if (Math.random() < pb0) pb++; }
+  let pa = 0, pb = 0; for (let i = 0; i < 5; i++) { if (rngV50() < pa0) pa++; if (rngV50() < pb0) pb++; }
+  let n = 0; while (pa === pb && n++ < 30) { if (rngV50() < pa0) pa++; if (rngV50() < pb0) pb++; }
   if (pa === pb) pa++;
   return { pa, pb };
 }
@@ -3047,7 +3074,11 @@ function rrRounds(ids) {   // «круговая система»: каждый 
   return rounds;
 }
 const mkMatch = (a, b, grp) => ({ a, b, ga: 0, gb: 0, pa: 0, pb: 0, done: false, grp: grp || '' });
-function matchWinner(m) { if (m.ga !== m.gb) return m.ga > m.gb ? m.a : m.b; return m.pa > m.pb ? m.a : m.b; }
+// Returns the winner's id, or null while the match is level on goals AND penalties (never silently picks side B).
+function matchWinner(m) { if (!m) return null; if (m.ga !== m.gb) return m.ga > m.gb ? m.a : m.b; if (m.pa !== m.pb) return m.pa > m.pb ? m.a : m.b; return null; }
+// Stable logic keys for knockout rounds; r.name is display text only. Old saves without r.stage are recognised by their legacy names.
+const ROUND_STAGE_LEGACY_V50 = { '1/4 финала': 'qf', '1/2 финала': 'sf', 'Финал': 'final' };
+const roundStage = r => (r && (r.stage || ROUND_STAGE_LEGACY_V50[r.name])) || null;
 
 function newComp(type, my) {
   const pool = type === 'world' ? TEAMS.filter(t => t.nation) : type.startsWith('league_') ? TEAMS.filter(t => t.league === type.slice(7)) : TEAMS.filter(t => !t.nation && !t.league);
@@ -3063,7 +3094,7 @@ function newComp(type, my) {
     const A = rrRounds(ids.slice(0, 4)), B = rrRounds(ids.slice(4, 8));
     for (let i = 0; i < 3; i++) c.rounds.push({ name: 'Группы, тур ' + (i + 1), ko: false, matches: A[i].map(p => mkMatch(p[0], p[1], 'A')).concat(B[i].map(p => mkMatch(p[0], p[1], 'B'))) });
   } else {
-    c.rounds.push({ name: '1/4 финала', ko: true, matches: [0, 2, 4, 6].map(i => mkMatch(ids[i], ids[i + 1], '')) });
+    c.rounds.push({ name: '1/4 финала', stage: 'qf', ko: true, matches: [0, 2, 4, 6].map(i => mkMatch(ids[i], ids[i + 1], '')) });
   }
   return c;
 }
@@ -3094,6 +3125,7 @@ function compPlay(c, ures) {
       const s = simScore(m.a, m.b); m.ga = s.ga; m.gb = s.gb;
       if (r.ko && m.ga === m.gb) { const p = simPens(m.a, m.b); m.pa = p.pa; m.pb = p.pb; }
     }
+    if (r.ko && matchWinner(m) === null) { let p = simPens(m.a, m.b), n = 0; while (p.pa === p.pb && n++ < 20) p = simPens(m.a, m.b); m.pa = p.pa; m.pb = p.pb + (p.pa === p.pb ? 1 : 0); }   // v50: a knockout match always has a winner
     m.done = true;
   });
   if (r.ko && !r.matches.some(m => matchWinner(m) === c.my && (m.a === c.my || m.b === c.my))) c.out = true;
@@ -3102,16 +3134,16 @@ function compPlay(c, ures) {
 function compAfterRound(c) {
   const r = c.rounds[c.cur];
   if (c.cur < c.rounds.length - 1) { c.cur++; return; }
-  if (r.name === 'Финал') { c.done = true; c.champion = matchWinner(r.matches[0]); return; }
+  if (roundStage(r) === 'final') { c.done = true; c.champion = matchWinner(r.matches[0]); return; }
   if (c.type === 'league' || c.type.startsWith('league_')) { c.done = true; c.champion = compStandings(c, 'L')[0].id; return; }
   let nxt;
   if (r.ko) {
     const w = r.matches.map(matchWinner);
-    nxt = w.length === 4 ? { name: '1/2 финала', ko: true, matches: [mkMatch(w[0], w[1]), mkMatch(w[2], w[3])] } : { name: 'Финал', ko: true, matches: [mkMatch(w[0], w[1])] };
+    nxt = w.length === 4 ? { name: '1/2 финала', stage: 'sf', ko: true, matches: [mkMatch(w[0], w[1]), mkMatch(w[2], w[3])] } : { name: 'Финал', stage: 'final', ko: true, matches: [mkMatch(w[0], w[1])] };
   } else if (c.type === 'ucl') {
-    const t = compStandings(c, 'L'); nxt = { name: '1/2 финала', ko: true, matches: [mkMatch(t[0].id, t[3].id), mkMatch(t[1].id, t[2].id)] };
+    const t = compStandings(c, 'L'); nxt = { name: '1/2 финала', stage: 'sf', ko: true, matches: [mkMatch(t[0].id, t[3].id), mkMatch(t[1].id, t[2].id)] };
   } else {
-    const A = compStandings(c, 'A'), B = compStandings(c, 'B'); nxt = { name: '1/2 финала', ko: true, matches: [mkMatch(A[0].id, B[1].id), mkMatch(B[0].id, A[1].id)] };
+    const A = compStandings(c, 'A'), B = compStandings(c, 'B'); nxt = { name: '1/2 финала', stage: 'sf', ko: true, matches: [mkMatch(A[0].id, B[1].id), mkMatch(B[0].id, A[1].id)] };
   }
   if (!nxt.matches.some(m => m.a === c.my || m.b === c.my)) c.out = true;   // команда игрока не прошла дальше
   c.rounds.push(nxt); c.cur++;
@@ -3711,7 +3743,7 @@ function bindSliders(root, tab) {
       }
       paint(); onSettingChanged(k); save();
     };
-    el.addEventListener('pointerdown', e => { down.on = true; try { el.setPointerCapture(e.pointerId); } catch (_) {} Audio_.init(); setFrom(e); });
+    el.addEventListener('pointerdown', e => { down.on = true; try { el.setPointerCapture(e.pointerId); } catch (_) { window.__cbLog && window.__cbLog(_); } Audio_.init(); setFrom(e); });
     el.addEventListener('pointermove', e => { if (down.on) setFrom(e); });
     const up = () => { down.on = false; if (/^v/.test(k)) SFX.kick(0.5, 0); }; el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
     paint();
@@ -4017,7 +4049,7 @@ function cbOpenPhoto(kind){
 }
 function cbSaveScreenshot(){try{renderer.render(scene,camera);const href=renderer.domElement.toDataURL('image/png');const a=document.createElement('a');a.href=href;a.download='cowball-'+Date.now()+'.png';document.body.appendChild(a);a.click();a.remove();}catch(e){alert('Не удалось сохранить кадр. Повтори попытку после загрузки 3D-сцены.');}}
 function cbApplyAccess(){const a=settings.accessProfile||'standard';document.documentElement.dataset.access=a;if(a==='reduced'&&settings.uiAnim==='full')document.documentElement.dataset.anim='reduced';}
-function cbAddRecords(res){try{const row={date:new Date().toLocaleString('ru-RU'),a:res.cfg.tA.name,b:res.cfg.tB.name,score:res.score.slice(),mode:res.cfg.utManaged?('Ultimate Team · '+(res.cfg.utMode||'friendly')):res.cfg.comp?'Турнир':res.cfg.versus?'Вдвоём':'Матч',goals:res.score[0]+res.score[1]};settings.localRecords.unshift(row);settings.localRecords=settings.localRecords.slice(0,100);save();}catch(e){}}
+function cbAddRecords(res){try{const row={date:new Date().toLocaleString('ru-RU'),a:res.cfg.tA.name,b:res.cfg.tB.name,score:res.score.slice(),mode:res.cfg.utManaged?('Ultimate Team · '+(res.cfg.utMode||'friendly')):res.cfg.comp?'Турнир':res.cfg.versus?'Вдвоём':'Матч',goals:res.score[0]+res.score[1]};settings.localRecords.unshift(row);settings.localRecords=settings.localRecords.slice(0,100);save();}catch (e) { window.__cbLog && window.__cbLog(e); }}
 function cbRenderRecords(){const rows=settings.localRecords||[];return `<div class="utPanel"><h3>Рекорды на этом устройстве</h3><p class="help">Здесь хранится история завершённых матчей только на этом устройстве.</p><div class="utSummary"><div class="utStat"><small>Матчи</small><b>${rows.length}</b></div><div class="utStat"><small>Голов</small><b>${rows.reduce((n,r)=>n+(r.goals||0),0)}</b></div><div class="utStat"><small>Лучший результат</small><b>${Math.max(0,...rows.map(r=>r.score?r.score[0]:0))}</b></div></div>${rows.map(r=>`<div class="korow"><div><b>${cbEsc(r.a)} ${r.score[0]} : ${r.score[1]} ${cbEsc(r.b)}</b><small style="display:block;color:var(--mut)">${cbEsc(r.date)} · ${cbEsc(r.mode)}</small></div></div>`).join('')||'<p class="help">Матчи пока не записаны.</p>'}<button class="mi" data-a="clearRecords">Очистить историю рекордов…</button></div>`;}
 function cbAchievementRewardsHtml(){const all=utAchievements().concat([
  {id:'plays10',name:'Постоянный игрок',desc:'Сыграть 10 матчей',ok:ut.stats.played>=10,icon:'📆'},
@@ -4045,8 +4077,8 @@ humanControl=cbWrapSpeed(humanControl);fieldAI=cbWrapSpeed(fieldAI);keeperAI=cbW
 const _cbTackleSteal=tackleSteal;tackleSteal=function(c,hold){if(c)c.slideT=24;if(hold)hold.stum=1;const r=_cbTackleSteal(c,hold);return r;};
 const _cbCowAnimExtra=cowAnimExtra;cowAnimExtra=function(c,spd,dt){_cbCowAnimExtra(c,spd,dt);if(c.slideT>0){c.slideT=Math.max(0,c.slideT-dt);const k=Math.sin(c.slideT/24*Math.PI);c.body.rotation.z+=.28*k;c.body.rotation.x+=.10*k;c.legs.forEach((l,i)=>{if(i<2)l.rotation.z+=.2*k*(i===0?1:-1);});}if(c.stum>0)c.body.rotation.z+=Math.sin(clock*.9+(c.lk||0))*Math.min(.2,c.stum*.2);};
 const _cbStartMatchNow=startMatchNow;startMatchNow=function(cfg){resetRuleStats();const r=_cbStartMatchNow(cfg);cows.forEach(c=>{c.matchStamina=1;c.dismissed=false;});return r;};
-const _cbOnMatchEnd=onMatchEnd;onMatchEnd=function(res){_cbOnMatchEnd(res);try{$('endBody').insertAdjacentHTML('beforeend',`<h3>Игровые правила</h3><table class="stats">${cbRuleSummaryRows()}</table>`);}catch(e){}};
-const _cbFinishMatchNow=finishMatchNow;finishMatchNow=function(){try{cbAddRecords({cfg:matchCfg,score:score});}catch(e){}return _cbFinishMatchNow();};
+const _cbOnMatchEnd=onMatchEnd;onMatchEnd=function(res){_cbOnMatchEnd(res);try{$('endBody').insertAdjacentHTML('beforeend',`<h3>Игровые правила</h3><table class="stats">${cbRuleSummaryRows()}</table>`);}catch (e) { window.__cbLog && window.__cbLog(e); }};
+const _cbFinishMatchNow=finishMatchNow;finishMatchNow=function(){try{cbAddRecords({cfg:matchCfg,score:score});}catch (e) { window.__cbLog && window.__cbLog(e); }return _cbFinishMatchNow();};
 const _cbStepGame=stepGame;stepGame=function(dt){if(featureModalState&&featureModalState.kind==='replayCamera')return _cbStepGame(0);return _cbStepGame(dt);};
 const _cbSyncScene=syncScene;syncScene=function(dt){_cbSyncScene(dt);let opt=null;if(photoModeState.active)opt=photoModeState;else if(featureModalState&&featureModalState.kind==='replayCamera'&&state==='replay')opt=replayCamState;if(opt){const a=opt.angle*Math.PI/180,dist=+opt.distance,h=+opt.height,x=wx(ball.x),z=wz(ball.y);camera.position.set(x+Math.sin(a)*dist,h,z+Math.cos(a)*dist);camera.lookAt(x,.4,z);}};
 // D) Main features: rules, substitutions, shirt editor, photography, achievements, daily/season rewards and records.
@@ -4124,7 +4156,7 @@ const UTX_PARTIAL_KEYS=new Set(['СИНИЕ','КРАСНЫЕ','Дивизион'
 function utxTranslateText(raw){const trim=raw.trim();if(!trim)return raw;const src=UTX_FROM[trim]||trim;if(UTX_DICT[src]){const target=settings.lang==='ru'?src:UTX_DICT[src][utxLang()-1]||src;return raw.replace(trim,target);}let text=trim;const translated=UTX_PARTIAL_ROWS.flatMap(r=>r.slice(1).map(v=>({v,src:r[0]}))).filter(x=>x.v&&x.v!==x.src).sort((a,b)=>b.v.length-a.v.length);for(const x of translated)if(text.includes(x.v))text=text.split(x.v).join(x.src);if(settings.lang!=='ru'){for(const r of UTX_PARTIAL_ROWS){const v=r[0],target=r[utxLang()];if(text.includes(v)&&target)text=text.split(v).join(target);}}return raw.replace(trim,text);}
 function utxTranslateDOM(root=document){if(UTX_BUSY||!root)return;UTX_BUSY=true;try{const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n;while((n=w.nextNode())){const translated=utxTranslateText(n.nodeValue);if(translated!==n.nodeValue)n.nodeValue=translated;}if(root.querySelectorAll)root.querySelectorAll('input[placeholder],input[aria-label],button[aria-label],select[aria-label], [title]').forEach(el=>['placeholder','aria-label','title'].forEach(a=>{const v=el.getAttribute(a);if(v){const translated=utxTranslateText(v);if(translated!==v)el.setAttribute(a,translated);}}));}finally{UTX_BUSY=false;}}
 function utxTranslateAll(){document.querySelectorAll('.scr').forEach(el=>utxTranslateDOM(el));['tacOv','cbFeatureModal','utReveal','penui','penhud','banner','commentary','center','hud','tbtns','skipTag','replayTag','pName'].forEach(id=>{const el=document.getElementById(id);if(el)utxTranslateDOM(el);});}
-function utxApplyLanguage(){try{document.documentElement.lang=settings.lang||'ru';if(window.applyTeamNames)window.applyTeamNames();utxTranslateAll();}catch(e){}if(screen==='ut')renderUT();if(screen==='settings')renderSettings();if(screen==='home')renderHome();}
+function utxApplyLanguage(){try{document.documentElement.lang=settings.lang||'ru';if(window.applyTeamNames)window.applyTeamNames();utxTranslateAll();}catch (e) { window.__cbLog && window.__cbLog(e); }if(screen==='ut')renderUT();if(screen==='settings')renderSettings();if(screen==='home')renderHome();}
 function utxLeagueForClub(club){return ({'Ясные Холмы':'Лига Зелёных Долин','Клеверный Союз':'Кубок Клеверных Полей','Северный Рог':'Северная Лига Пастбищ','Зелёный Пастух':'Федерация Лесных Стадионов'})[club]||'Лига Зелёных Долин';}
 function utxInitSchema(){
   if(!Array.isArray(ut.userListings))ut.userListings=[];if(!Array.isArray(ut.myBids))ut.myBids=[];if(!Array.isArray(ut.marketHistory))ut.marketHistory=[];if(!Array.isArray(ut.packHistory))ut.packHistory=[];if(!ut.marketHistory.length){(ut.stats?.purchases||[]).forEach((x,i)=>ut.marketHistory.push({id:'legacy_buy_'+i,type:'purchase',name:x.name||'Player',amount:+x.price||0,ts:+x.ts||Date.parse(x.date)||Date.now()}));(ut.stats?.sales||[]).forEach((x,i)=>ut.marketHistory.push({id:'legacy_sell_'+i,type:'sale',name:x.name||'Player',amount:+x.price||0,ts:+x.ts||Date.parse(x.date)||Date.now(),tax:+x.tax||0}));ut.marketHistory.sort((a,b)=>b.ts-a.ts);ut.marketHistory=ut.marketHistory.slice(0,100);}
@@ -4228,7 +4260,7 @@ const UTX_OLD_REVEAL=showUTReveal;
 showUTReveal=function(card){UTX_OLD_REVEAL(card);const t=$('utRevealTitle'),s=$('utRevealSub');if(card?.duplicateConverted){if(t)t.textContent=utxT('Повтор превращён в монеты');if(s)s.textContent=`+${card.duplicateCoins} 🪙`;}else if(t)t.textContent=utxT('Пак открыт!');utxTranslateDOM($('utReveal'));};
 // The locale changes immediately throughout existing DOM, including menu/settings/UT text nodes.
 document.addEventListener('change',e=>{if(e.target&&e.target.id==='gameLanguage'){const v=e.target.value;if(UTX_LANGS[v]){settings.lang=v;save();utxApplyLanguage();}}else if(e.target&&e.target.classList?.contains('utxFilter')){ut.marketFilters[e.target.dataset.f]=e.target.dataset.f==='minRating'||e.target.dataset.f==='maxPrice'?Math.max(0,+e.target.value||0):e.target.value;saveUT();renderUT();}else if(e.target&&['utHomeColor','utAwayColor','utKitPattern','utEmblemShape'].includes(e.target.id)){/* draft controls commit together through Save */}});
-document.addEventListener('input',e=>{if(e.target&&e.target.classList?.contains('utxFilter')){const k=e.target.dataset.f;if(k!=='q')return;ut.marketFilters.q=e.target.value;const cursor=e.target.selectionStart;saveUT();renderUT();const next=document.querySelector('.utxFilter[data-f="q"]');if(next){next.focus({preventScroll:true});try{next.setSelectionRange(cursor,cursor);}catch(_){}}}});
+document.addEventListener('input',e=>{if(e.target&&e.target.classList?.contains('utxFilter')){const k=e.target.dataset.f;if(k!=='q')return;ut.marketFilters.q=e.target.value;const cursor=e.target.selectionStart;saveUT();renderUT();const next=document.querySelector('.utxFilter[data-f="q"]');if(next){next.focus({preventScroll:true});try{next.setSelectionRange(cursor,cursor);}catch (_) { window.__cbLog && window.__cbLog(_); }}}});
 // Countdowns update only text nodes; market data is processed at a low cadence while its screen is open.
 let utxSecond=0;setInterval(()=>{if(screen!=='ut')return;document.querySelectorAll('[data-utx-expiry]').forEach(el=>{el.textContent=utxTimeLeft(+el.dataset.utxExpiry||0);});if(utTab==='market'&&++utxSecond%15===0){const changed=utxProcessExpiry();if(changed)renderUT();}},1000);
 // Keep the resolution slider at its supported range; startup selects the maximum 100% value.
@@ -4345,7 +4377,7 @@ const _renderSettingsReal = renderSettings;
 renderSettings = function() {
   _renderSettingsReal();
   if (SET_TABS[setTab] && (SET_TABS[setTab].id === 'snd' || SET_TABS[setTab].id === 'camera')) {
-    const el = $('setBody'); if (el) { const note=document.createElement('div'); note.className='kbhelp'; note.textContent = SET_TABS[setTab].id === 'snd' ? 'Оригинальная музыка и звуковые файлы загружаются из assets/audio. Громкость музыки, мяча, свистка и трибун регулируется отдельно. Диктор использует встроенный голос браузера, если он доступен.' : 'Телевизионная камера плавно меняет общий, боковой и крупный план во время церемоний. На слабом устройстве переходы остаются лёгкими.'; el.appendChild(note); }
+    const el = $('setBody'); if (el) { const note=document.createElement('div'); note.className='kbhelp'; note.textContent = SET_TABS[setTab].id === 'snd' ? 'Оригинальная музыка и звуковые файлы загружаются из папки игры (файлы .mp3). Громкость музыки, мяча, свистка и трибун регулируется отдельно. Диктор использует встроенный голос браузера, если он доступен.' : 'Телевизионная камера плавно меняет общий, боковой и крупный план во время церемоний. На слабом устройстве переходы остаются лёгкими.'; el.appendChild(note); }
   }
 };
 
@@ -4437,11 +4469,11 @@ const RealSnd = (() => {
   };
 })();
 const _audioInitReal = Audio_.init;
-Audio_.init = function(){ try{_audioInitReal();}catch(e){} RealSnd.init(); };
+Audio_.init = function(){ try{_audioInitReal();}catch (e) { window.__cbLog && window.__cbLog(e); } RealSnd.init(); };
 const _crowdAudioReal = Audio_.crowd;
-Audio_.crowd = function(level){ try{_crowdAudioReal(settings.stadiumSound ? level : 0);}catch(e){} RealSnd.crowd(settings.stadiumSound ? level : 0); };
+Audio_.crowd = function(level){ try{_crowdAudioReal(settings.stadiumSound ? level : 0);}catch (e) { window.__cbLog && window.__cbLog(e); } RealSnd.crowd(settings.stadiumSound ? level : 0); };
 const _swellAudioReal = Audio_.swell;
-Audio_.swell = function(level,dur){ if(settings.stadiumSound){ try{_swellAudioReal(level,dur);}catch(e){} RealSnd.crowdCheer(level,dur); } else { try{_crowdAudioReal(0);}catch(e){} RealSnd.crowd(0); } };
+Audio_.swell = function(level,dur){ if(settings.stadiumSound){ try{_swellAudioReal(level,dur);}catch (e) { window.__cbLog && window.__cbLog(e); } RealSnd.crowdCheer(level,dur); } else { try{_crowdAudioReal(0);}catch (e) { window.__cbLog && window.__cbLog(e); } RealSnd.crowd(0); } };
 // Переназначаем только звуковые события: физика и триггеры матча не меняются.
 SFX.kick = (p,pan)=>RealSnd.hit(p,pan,true);
 SFX.pass = (p,pan)=>RealSnd.hit(p,pan,false);
@@ -4519,10 +4551,10 @@ function ensureOutroCupV16(c){
 }
 // Церемония окончания: заминка, медленный сбор, рукопожатия, реакции, статистика и уход.
 beginOutro = function(){
-  setCenter(''); assignLk();
+  cancelOutroTimersV50(); setCenter(''); assignLk();
   SFX.whistle(.52);
-  setTimeout(()=>{if(state==='outro')SFX.whistle(.55);},650);
-  setTimeout(()=>{if(state==='outro')SFX.whistle(1.05);},1320);
+  outroTimerV50(()=>{if(state==='outro')SFX.whistle(.55);},650);
+  outroTimerV50(()=>{if(state==='outro')SFX.whistle(1.05);},1320);
   Audio_.crowd(.5); ball.carrier=null; ball.holder=null; outroT=0; outroGreet=false; outroCheer=false;
   outroWinner=score[0]===score[1]?-1:(score[0]>score[1]?0:1);
   cows.forEach(c=>{c.ox=c.x;c.oy=c.y;c.outroStartX=c.x;c.outroStartY=c.y;c.faceAng=undefined;ensureOutroCupV16(c);if(c.cupV16)c.cupV16.visible=false;});
@@ -4617,7 +4649,7 @@ cowAnimExtra=function(c,spd,dt){
   }
 };
 const _settingChangedReal=onSettingChanged;
-onSettingChanged=function(k){_settingChangedReal(k);if(['vMaster','vSfx','vBall','vWhistle','vSteps','vGoal','vCrowd','stadiumSound','anthemEnabled','cartoonSounds','realisticCamera'].includes(k)){if(k==='stadiumSound'&&!settings.stadiumSound){try{_crowdAudioReal(0);}catch(e){}RealSnd.crowd(0);} if(k==='stadiumSound'&&settings.stadiumSound)Audio_.crowd(.35);}};
+onSettingChanged=function(k){_settingChangedReal(k);if(['vMaster','vSfx','vBall','vWhistle','vSteps','vGoal','vCrowd','stadiumSound','anthemEnabled','cartoonSounds','realisticCamera'].includes(k)){if(k==='stadiumSound'&&!settings.stadiumSound){try{_crowdAudioReal(0);}catch (e) { window.__cbLog && window.__cbLog(e); }RealSnd.crowd(0);} if(k==='stadiumSound'&&settings.stadiumSound)Audio_.crowd(.35);}};
 
 
 // ================== v17: responsive fixes, weather, audio unlock, names, and human-controlled restarts ==================
@@ -4637,10 +4669,10 @@ setScreen = function(name){
 // Defensive localStorage sanitation for all newly introduced settings.
 ['vBall','vWhistle','vSteps','vGoal'].forEach(k=>{const n=Number(settings[k]);settings[k]=Number.isFinite(n)?clamp(n,0,100):DEF[k];});
 ['stadiumSound','anthemEnabled','cartoonSounds','realisticCamera','showFps'].forEach(k=>{if(typeof settings[k]!=='boolean')settings[k]=DEF[k];});
-try{save();}catch(e){}
+try{save();}catch (e) { window.__cbLog && window.__cbLog(e); }
 // Do not allow stale names from old tournament/UT saves to render as "undefined".
 const _assignNamesV17=assignNames;
-function safeNameV17(c,i){let candidate='';try{const t=c.tdef||sideTeam[c.team]||TEAMS[0];candidate=nameFor(t,c.role||'fw',Number.isFinite(c.lk)?c.lk:(i||0));}catch(e){}if(!candidate||/undefined|null/i.test(String(candidate))){const n=Math.abs(Number(c.num)||i||0);candidate=String(NM_FIRST[n%NM_FIRST.length]).charAt(0)+'. '+NM_SUR[(n*7+3)%NM_SUR.length];}return candidate;}
+function safeNameV17(c,i){let candidate='';try{const t=c.tdef||sideTeam[c.team]||TEAMS[0];candidate=nameFor(t,c.role||'fw',Number.isFinite(c.lk)?c.lk:(i||0));}catch (e) { window.__cbLog && window.__cbLog(e); }if(!candidate||/undefined|null/i.test(String(candidate))){const n=Math.abs(Number(c.num)||i||0);candidate=String(NM_FIRST[n%NM_FIRST.length]).charAt(0)+'. '+NM_SUR[(n*7+3)%NM_SUR.length];}return candidate;}
 assignNames=function(){_assignNamesV17();cows.forEach((c,i)=>{if(!c.pname||/undefined|null/i.test(String(c.pname)))c.pname=safeNameV17(c,i);if(!Number.isFinite(Number(c.num))||Number(c.num)<1)c.num=20+i;});};
 function fixCowNameV17(c,i){if(!c)return;if(!c.pname||/undefined|null/i.test(String(c.pname)))c.pname=safeNameV17(c,i);if(!Number.isFinite(Number(c.num))||Number(c.num)<1)c.num=20+(i||0);}
 const _syncSceneNamesV17=syncScene;
@@ -4690,7 +4722,7 @@ buildCrowdInstances=function(root,E,outer,fill){
 
 // Music/audio starts only after the first trusted user gesture, so browser autoplay policy cannot leave it permanently silent.
 let _audioGestureReadyV17=false;
-const _wakeAudioV17=()=>{if(_audioGestureReadyV17)return;_audioGestureReadyV17=true;try{Audio_.init();if(Audio_.ctx&&Audio_.ctx.state==='suspended')Audio_.ctx.resume();syncMusic();}catch(e){}};
+const _wakeAudioV17=()=>{if(_audioGestureReadyV17)return;_audioGestureReadyV17=true;try{Audio_.init();if(Audio_.ctx&&Audio_.ctx.state==='suspended')Audio_.ctx.resume();syncMusic();}catch (e) { window.__cbLog && window.__cbLog(e); }};
 document.addEventListener('pointerdown',_wakeAudioV17,{once:true,passive:true});
 document.addEventListener('touchstart',_wakeAudioV17,{once:true,passive:true});
 document.addEventListener('keydown',_wakeAudioV17,{once:true});
@@ -4711,7 +4743,8 @@ const CowballAssetAudioV44 = (() => {
     pasture:'pasture.mp3', moo:'moo-groove.mp3', sunset:'sunset.mp3', pulse:'rush.mp3',
     spotlight:'sunset.mp3', afterglow:'sunset.mp3', cup:'cup-march.mp3', road:'cup-march.mp3',
     grand:'grand-finale.mp3', velocity:'rush.mp3', rise:'sunset.mp3', victory:'grand-finale.mp3',
-    anthem:'grand-finale.mp3', rush:'rush.mp3', night:'cup-march.mp3'
+    anthem:'grand-finale.mp3', rush:'rush.mp3', night:'cup-march.mp3',
+    ceremonyOpen:'ceremony-opening.mp3', ceremonyClose:'ceremony-closing.mp3'
   };
   const sfxFiles = {
     'ball-impact':'ball-impact.mp3','ball-pass':'ball-pass.mp3','net-hit':'net-hit.mp3',
@@ -4724,23 +4757,26 @@ const CowballAssetAudioV44 = (() => {
   let retiringMusic = null;
   const url = (base, name) => new URL(base + name, document.baseURI).href;
   const nvol = (key, fallback=70) => { const v=Number(settings[key]); return clamp((Number.isFinite(v)?v:fallback)/100,0,1); };
-  // Approximate per-track loudness trims measured from the supplied masters. This avoids
-  // abrupt perceived jumps between themes without re-encoding or damaging source MP3s.
-  const musicTrim = {
-    pasture:1.11, moo:0.83, sunset:0.95, spotlight:0.95, afterglow:0.95, rise:0.95,
-    pulse:0.60, rush:0.60, velocity:0.60,
-    cup:0.62, road:0.62, night:0.62,
-    grand:0.64, victory:0.64, anthem:0.64
-  };
+  const musicTrim = {};   // v49: all soundtrack masters are loudness-matched (about -14 LUFS), so no per-track trim is needed
   // Preload the small effects set quietly so the first kick/whistle is not delayed by a fetch.
-  try { Object.entries(sfxFiles).forEach(([name,file]) => { clipPools[name]=Array.from({length:3},()=>{const a=new Audio(url(sfxBase,file));a.preload='auto';return a;});clipIndex[name]=0; }); } catch (_) {}
+  try { Object.entries(sfxFiles).forEach(([name,file]) => { clipPools[name]=Array.from({length:3},()=>{const a=new Audio(url(sfxBase,file));a.preload='auto';return a;});clipIndex[name]=0; }); } catch (_) { window.__cbLog && window.__cbLog(_); }
+  // v49: realistic stadium effects are created on first use (no start-up preload cost).
+  Object.assign(sfxFiles, {
+    'ball-bounce':'ball-bounce.mp3','post-hit':'post-hit.mp3','glove-save':'glove-save.mp3','tackle':'tackle.mp3','card-flick':'card-flick.mp3',
+    'whistle-triple':'whistle-triple.mp3','coin-toss':'coin-toss.mp3','pa-chime':'pa-chime.mp3','tunnel-steps':'tunnel-steps.mp3',
+    'drumroll':'drumroll.mp3','cymbal-crash':'cymbal-crash.mp3','fireworks-launch':'fireworks-launch.mp3','fireworks-burst':'fireworks-burst.mp3',
+    'confetti-cannon':'confetti-cannon.mp3','pyro-flame':'pyro-flame.mp3','trophy-lift':'trophy-lift.mp3','trophy-reveal':'trophy-reveal.mp3',
+    'stadium-horn':'stadium-horn.mp3','crowd-roar-big':'crowd-roar-big.mp3','crowd-gasp':'crowd-gasp.mp3','crowd-boo':'crowd-boo.mp3',
+    'crowd-applause':'crowd-applause.mp3','crowd-chant':'crowd-chant.mp3'
+  });
+  function stopSfx(name) { const pool = clipPools[name]; if (pool) pool.forEach(a => { try { a.pause(); a.currentTime = 0; } catch (_) { window.__cbLog && window.__cbLog(_); } }); }
   const master = () => nvol('vMaster',80);
   function musicVolume(trackId) { return clamp(master()*nvol('vMusic',55)*0.92*(musicTrim[trackId]||1),0,1); }
   function applyTrackVolume(a) {
     if (!a) return;
     const trackId = a._cowballTrackId || currentMusicId;
     const fade = Number.isFinite(a._cowballFadeLevel) ? a._cowballFadeLevel : 1;
-    try { a.volume = clamp(musicVolume(trackId)*fade,0,1); } catch (_) {}
+    try { a.volume = clamp(musicVolume(trackId)*fade,0,1); } catch (_) { window.__cbLog && window.__cbLog(_); }
   }
   function updateVolumes() {
     if (currentMusic) applyTrackVolume(currentMusic);
@@ -4750,7 +4786,7 @@ const CowballAssetAudioV44 = (() => {
   function disposeTrack(a) {
     if (!a) return;
     if (a._cowballFadeTimer) { clearInterval(a._cowballFadeTimer); a._cowballFadeTimer=0; }
-    try { a.pause(); a.currentTime=0; } catch (_) {}
+    try { a.pause(); a.currentTime=0; } catch (_) { window.__cbLog && window.__cbLog(_); }
   }
   function fadeTrack(a, target, duration, done) {
     if (!a) { if(done)done(); return; }
@@ -4815,7 +4851,7 @@ const CowballAssetAudioV44 = (() => {
         pool=clipPools[name]=Array.from({length:3},()=>{const a=new Audio(url(sfxBase,file));a.preload='auto';return a;}); clipIndex[name]=0;
       }
       const i=clipIndex[name]++%pool.length, a=pool[i];
-      a.volume=volume; try{a.currentTime=0;}catch(_){}
+      a.volume=volume; try{a.currentTime=0;}catch (_) { window.__cbLog && window.__cbLog(_); }
       let failed=false; const fail=()=>{if(failed)return;failed=true;if(fallback)fallback();};
       a.addEventListener('error',fail,{once:true});
       const p=a.play(); if(p&&p.catch)p.catch(fail);
@@ -4827,11 +4863,11 @@ const CowballAssetAudioV44 = (() => {
     level=clamp(Number(level)||0,0,1);
     if(!crowdLoop) { try { crowdLoop=new Audio(url(sfxBase,'stadium-ambience.mp3')); crowdLoop.loop=true; crowdLoop.preload='auto'; crowdLoop.volume=0; crowdLoop.dataset.level='0'; } catch(_) { return; } }
     crowdLoop.dataset.level=String(level); updateVolumes();
-    if(level<0.015) { try{crowdLoop.pause();}catch(_){} return; }
+    if(level<0.015) { try{crowdLoop.pause();}catch (_) { window.__cbLog && window.__cbLog(_); } return; }
     if(crowdLoop.paused) { const p=crowdLoop.play(); if(p&&p.catch)p.catch(()=>{}); }
   }
-  function cheer(level=0.5) { if(settings.stadiumSound) playSfx('crowd-cheer',clamp(Number(level)||0.5,.2,1),'vCrowd'); }
-  return {playTrack,stopTrack,playSfx,crowd,cheer,updateVolumes,active:()=>!!currentMusic&&!currentMusic.paused,isTrack:id=>!!currentMusic&&!currentMusic.paused&&currentMusicId===id};
+  function cheer(level=0.5) { if(!settings.stadiumSound) return; const l=clamp(Number(level)||0.5,.2,1); playSfx(l>=0.85?'crowd-roar-big':'crowd-cheer',l>=0.85?l*.9:l,'vCrowd'); }
+  return {playTrack,stopTrack,playSfx,stopSfx,crowd,cheer,updateVolumes,active:()=>!!currentMusic&&!currentMusic.paused,isTrack:id=>!!currentMusic&&!currentMusic.paused&&currentMusicId===id};
 })();
 const _musicPlayAssetBaseV44=Audio_.music.play.bind(Audio_.music);
 const _musicStopAssetBaseV44=Audio_.music.stop.bind(Audio_.music);
@@ -4848,7 +4884,7 @@ Audio_.music.play=function(which){
   _musicStopAssetBaseV44();
   _musicModeV44=which;_musicTrackV44=trackId;_musicSynthActiveV44=false;
   // Keep the existing song position when the menu re-syncs after ordinary button clicks.
-  const fallbackToSynth=()=>{if(_musicModeV44!==which||_musicTrackV44!==trackId)return;_musicSynthActiveV44=true;try{_musicPlayAssetBaseV44(which);}catch(_){}};
+  const fallbackToSynth=()=>{if(_musicModeV44!==which||_musicTrackV44!==trackId)return;_musicSynthActiveV44=true;try{_musicPlayAssetBaseV44(which);}catch (_) { window.__cbLog && window.__cbLog(_); }};
   const ok=CowballAssetAudioV44.playTrack(which,trackId,fallbackToSynth);
   if(!ok){fallbackToSynth();return;}
 };
@@ -4873,6 +4909,87 @@ SFX.ui=()=>CowballAssetAudioV44.playSfx('ui-click',.75,'vSfx',()=>_sfxFallbackV4
 SFX.back=()=>CowballAssetAudioV44.playSfx('ui-click',.45,'vSfx',()=>_sfxFallbackV44.back&&_sfxFallbackV44.back());
 SFX.moo=(...args)=>CowballAssetAudioV44.playSfx('cow-moo',.7,'vSfx',()=>_sfxFallbackV44.moo&&_sfxFallbackV44.moo(...args));
 SFX.anthem=()=>{if(settings.anthemEnabled)CowballAssetAudioV44.playSfx('goal-fanfare',.42,'vGoal',()=>_sfxFallbackV44.anthem&&_sfxFallbackV44.anthem());};
+// ================= Cowball v49: realistic stadium sound events + ceremony bridge =================
+(()=>{
+  const A=CowballAssetAudioV44, crowdOn=()=>!!settings.stadiumSound, old=Object.assign({},SFX);
+  SFX.post=pan=>A.playSfx('post-hit',.85,'vBall',()=>old.post&&old.post(pan));
+  SFX.bounce=(pan,impact)=>A.playSfx('ball-bounce',clamp(.25+(Number(impact)||.3)*.9,.2,.9),'vBall',()=>old.bounce&&old.bounce(pan,impact));
+  SFX.tackle=pan=>A.playSfx('tackle',.7,'vBall',()=>old.tackle&&old.tackle(pan));
+  SFX.bodyHit=SFX.tackle;
+  SFX.save=pan=>A.playSfx('glove-save',.75,'vBall',()=>old.save&&old.save(pan));
+  SFX.glove=SFX.save;
+  SFX.coinToss=()=>A.playSfx('coin-toss',.7,'vSfx',()=>old.coinToss&&old.coinToss());
+  SFX.ooh=()=>{if(crowdOn())A.playSfx('crowd-gasp',.7,'vCrowd',()=>old.ooh&&old.ooh());};
+  SFX.anthem=()=>{if(settings.anthemEnabled)A.playSfx('pa-chime',.6,'vGoal');};   // goal-fanfare is now a real goal roar, so the pre-match cue is a PA chime
+  Object.assign(SFX,{
+    boo:()=>{if(crowdOn())A.playSfx('crowd-boo',.7,'vCrowd');},
+    applause:()=>{if(crowdOn())A.playSfx('crowd-applause',.8,'vCrowd');},
+    chant:()=>{if(crowdOn())A.playSfx('crowd-chant',.6,'vCrowd');},
+    roar:()=>{if(crowdOn())A.playSfx('crowd-roar-big',.9,'vCrowd');},
+    tunnel:()=>A.playSfx('tunnel-steps',.55,'vSteps'),
+    paChime:()=>A.playSfx('pa-chime',.6,'vGoal'),
+    drumroll:()=>A.playSfx('drumroll',.8,'vGoal'),
+    cymbal:()=>A.playSfx('cymbal-crash',.8,'vGoal'),
+    fwLaunch:()=>A.playSfx('fireworks-launch',.6,'vGoal'),
+    fwBurst:()=>A.playSfx('fireworks-burst',.75,'vGoal'),
+    confettiPop:()=>A.playSfx('confetti-cannon',.75,'vGoal'),
+    pyro:()=>A.playSfx('pyro-flame',.6,'vGoal'),
+    trophyLift:()=>A.playSfx('trophy-lift',.8,'vGoal'),
+    trophyReveal:()=>A.playSfx('trophy-reveal',.9,'vGoal'),
+    card:()=>A.playSfx('card-flick',.7,'vWhistle'),
+    stopLoopFx:()=>{['crowd-chant','tunnel-steps','drumroll'].forEach(n=>A.stopSfx(n));}
+  });
+
+  // Match events: tunnel walk-out + chant before kick-off, applause after the final whistle, boos on fouls, drum roll before penalties.
+  const _br=beginReady;beginReady=function(full){const r=_br.apply(this,arguments);if(full){SFX.tunnel();setTimeout(()=>{if(state==='ready'&&introFull)SFX.chant();},2600);}return r;};
+  const _sk=startKickoff;startKickoff=function(){SFX.stopLoopFx();return _sk.apply(this,arguments);};
+  const _bo=beginOutro;beginOutro=function(){const r=_bo.apply(this,arguments);outroTimerV50(()=>{if(state==='outro')SFX.applause();},1400);return r;};
+  const _sp=startPens;startPens=function(){SFX.drumroll();return _sp.apply(this,arguments);};
+  const _rs=setRestartStateV17;setRestartStateV17=function(type,team,x,y,reason){const r=_rs.apply(this,arguments);if(type==='foul'||type==='offside'){setTimeout(()=>SFX.boo(),250);if(/карточ/.test(String(reason||'')))SFX.card();}return r;};
+
+  // Ceremonies setting (default on) + keep the menu soundtrack from replacing ceremony music.
+  if(typeof settings.ceremonies!=='boolean')settings.ceremonies=true;
+  const gt=SET_TABS.find(t=>t.id==='game');
+  if(gt&&!gt.items.some(x=>x.k==='ceremonies'))gt.items.push({k:'ceremonies',label:'Церемонии открытия и закрытия',opts:onoff});
+  const _mp=Audio_.music.play;Audio_.music.play=function(){if(window.__cbCeremonyOn)return;return _mp.apply(this,arguments);};
+  const _ms=Audio_.music.stop;Audio_.music.stop=function(){if(window.__cbCeremonyOn)return;return _ms.apply(this,arguments);};
+
+  // Bridge for cowball-v49-ceremony.js (the core lives inside boot(), so other scripts cannot see its variables).
+  window.CowballV49Host={
+    get settings(){return settings;},get comp(){return comp;},
+    teamById,compStandings,COMPS,matchWinner,hex,
+    trophy:(type,team)=>trophyDescriptorV19(type,team),
+    audio:{play:(n,s,ch)=>A.playSfx(n,s,ch||'vGoal'),stop:n=>A.stopSfx(n),track:id=>A.playTrack('ceremony',id),stopTrack:ms=>A.stopTrack(ms||0),busy:on=>{window.__cbCeremonyOn=!!on;}},
+    resumeMusic:()=>{try{syncMusic();}catch (_) { window.__cbLog && window.__cbLog(_); }}
+  };
+  // Opening ceremony: first visit of a brand-new competition. Closing ceremony: once the final result is known.
+  const _enterHubV49=enterHub;
+  enterHub=function(){
+    const C=window.CowballCeremony;
+    const fresh=!!(comp&&!comp.done&&!comp.ceremonyOpenedV49&&!comp.rounds.some(r=>r.matches.some(m=>m.done)));
+    const want=!!(fresh&&C&&settings.ceremonies!==false);
+    if(want)window.__cbCeremonyOn=true;   // keep the hub soundtrack from starting under the ceremony
+    const r=_enterHubV49.apply(this,arguments);
+    if(want){
+      comp.ceremonyOpenedV49=true;save();let ok=false;
+      try{ok=C.opening(window.CowballV49Host,comp);}catch(e){console.warn('Ceremony:',e);}
+      if(!ok){window.__cbCeremonyOn=false;try{syncMusic();}catch (_) { window.__cbLog && window.__cbLog(_); }}
+    }
+    return r;
+  };
+  const _renderHubV49=renderHub;
+  renderHub=function(){
+    const r=_renderHubV49.apply(this,arguments);
+    const C=window.CowballCeremony;
+    if(comp&&comp.done&&!comp.ceremonyClosedV49&&C&&settings.ceremonies!==false){
+      comp.ceremonyClosedV49=true;save();window.__cbCeremonyOn=true;let ok=false;
+      try{ok=C.closing(window.CowballV49Host,comp);}catch(e){console.warn('Ceremony:',e);}
+      if(!ok){window.__cbCeremonyOn=false;try{syncMusic();}catch (_) { window.__cbLog && window.__cbLog(_); }}
+    }
+    return r;
+  };
+})();
+
 // Keep external assets quiet on tab switches and restore full music level on return.
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(CowballAssetAudioV44.active())Audio_.music.stop();CowballAssetAudioV44.crowd(0);}else{if(settings.stadiumSound&&state!=='menu')CowballAssetAudioV44.crowd(.25);if(state==='menu')syncMusic();}});
 
@@ -4882,7 +4999,7 @@ say=function(key,force){const now=performance.now();if(now-_sayWallV17<3600)retu
 
 let _cartoonAudioCtxV17=null;
 function cartoonBeepV17(final){
-  try{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return; if(!_cartoonAudioCtxV17)_cartoonAudioCtxV17=new AC();const ctx=_cartoonAudioCtxV17;if(ctx.state==='suspended')ctx.resume();const t=ctx.currentTime,o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.setValueAtTime(final?880:440,t);if(final)o.frequency.exponentialRampToValueAtTime(660,t+.28);g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(clamp(settings.vSfx/100,0,1)*.07,t+.008);g.gain.exponentialRampToValueAtTime(.0001,t+(final?.32:.12));o.connect(g);g.connect(ctx.destination);o.start(t);o.stop(t+(final?.34:.14));}catch(e){}
+  try{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return; if(!_cartoonAudioCtxV17)_cartoonAudioCtxV17=new AC();const ctx=_cartoonAudioCtxV17;if(ctx.state==='suspended')ctx.resume();const t=ctx.currentTime,o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.setValueAtTime(final?880:440,t);if(final)o.frequency.exponentialRampToValueAtTime(660,t+.28);g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(clamp(settings.vSfx/100,0,1)*.07,t+.008);g.gain.exponentialRampToValueAtTime(.0001,t+(final?.32:.12));o.connect(g);g.connect(ctx.destination);o.start(t);o.stop(t+(final?.34:.14));}catch (e) { window.__cbLog && window.__cbLog(e); }
 }
 SFX.beep=function(final){if(settings.cartoonSounds){cartoonBeepV17(!!final);return;}if(final)RealSnd.whistle(.23,0);else RealSnd.click(0);};
 
@@ -5007,7 +5124,7 @@ finishComp=function(ures){_finishCompV19(ures);if(comp&&comp.done){recordCareerS
 const _oldRenderHomeV19=renderHome;
 renderHome=function(){_oldRenderHomeV19();const el=$('wins');if(el)el.textContent=`Побед: ${settings.wins} · Матчей: ${settings.played} · Голов: ${settings.goals} · Трофеев: ${settings.trophyCabinet.length}`;};
 const _stepOutroFieldV19=stepOutro;
-stepOutro=function(dt){_stepOutroFieldV19(dt);const finalCup=state==='outro'&&outroT>=340&&outroWinner===0&&matchCfg&&matchCfg.comp&&matchCfg.ko&&comp&&comp.rounds[comp.cur]&&comp.rounds[comp.cur].name==='Финал';trophyPropV19.visible=!!finalCup;if(finalCup){trophyPropV19.position.set(0,.06,0);trophyPropV19.rotation.y=Math.sin(clock*.025)*.14;const win=sideTeam[0];cupBaseV19.material.color.setHex(win.c1||0xffd24a);cupBadgeV19.material.color.setHex(win.c2||0xffffff);}};
+stepOutro=function(dt){_stepOutroFieldV19(dt);const finalCup=state==='outro'&&outroT>=340&&outroWinner===0&&matchCfg&&matchCfg.comp&&matchCfg.ko&&comp&&comp.rounds[comp.cur]&&roundStage(comp.rounds[comp.cur])==='final';trophyPropV19.visible=!!finalCup;if(finalCup){trophyPropV19.position.set(0,.06,0);trophyPropV19.rotation.y=Math.sin(clock*.025)*.14;const win=sideTeam[0];cupBaseV19.material.color.setHex(win.c1||0xffd24a);cupBadgeV19.material.color.setHex(win.c2||0xffffff);}};
 // Golden 3D trophy used during a cup final celebration.
 const trophyPropV19=new THREE.Group();trophyPropV19.name='CowballCupPresentation';trophyPropV19.userData.fieldDynamic=true;
 const trophyGoldV19=new THREE.MeshStandardMaterial({color:0xffd34d,metalness:.78,roughness:.24}),trophyDarkV19=new THREE.MeshStandardMaterial({color:0x8a6219,metalness:.65,roughness:.32});
@@ -5102,13 +5219,13 @@ document.body.appendChild(v21controls);
 const v21joy=document.createElement('div');v21joy.id='v21Joy';document.body.appendChild(v21joy);
 let v21Fullscreen=false,v21JoyState={left:{id:null,x:0,y:0,ox:0,oy:0},right:{id:null,x:0,y:0,ox:0,oy:0}},v21TouchActions={left:{},right:{}},v21PhotoDrag=null,v21TutPage=0,v21RadarLast=0,v21AvatarCow=null;
 const v21FsApi=()=>!!(document.fullscreenEnabled||document.webkitFullscreenEnabled||document.mozFullScreenEnabled||document.msFullscreenEnabled||document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen||document.documentElement.msRequestFullscreen);
-function v21Resize(){try{resizeGL();if(typeof applyRes==='function')applyRes();}catch(e){} }
+function v21Resize(){try{resizeGL();if(typeof applyRes==='function')applyRes();}catch (e) { window.__cbLog && window.__cbLog(e); } }
 function v21FsState(){v21Fullscreen=!!(document.fullscreenElement||document.webkitFullscreenElement||document.mozFullScreenElement||document.msFullscreenElement);$('v21Full').textContent=v21Fullscreen?'⤢':'⛶';$('v21Full').title=v21Fullscreen?'Выйти из полного экрана':'На весь экран';setTimeout(v21Resize,100);}
 function v21FullscreenToggle(){
  const root=document.documentElement;let result;
  try{
    if(document.fullscreenElement||document.webkitFullscreenElement||document.mozFullScreenElement||document.msFullscreenElement){result=(document.exitFullscreen&&document.exitFullscreen())||(document.webkitExitFullscreen&&document.webkitExitFullscreen())||(document.mozCancelFullScreen&&document.mozCancelFullScreen())||(document.msExitFullscreen&&document.msExitFullscreen());}
-   else{const req=root.requestFullscreen||root.webkitRequestFullscreen||root.webkitRequestFullScreen||root.mozRequestFullScreen||root.msRequestFullscreen;if(!req){$('v21HomeHint').style.display='none';return;}result=req.call(root);if(window.screen&&window.screen.orientation&&window.screen.orientation.lock){try{window.screen.orientation.lock('landscape').catch(()=>{});}catch(e){}}}
+   else{const req=root.requestFullscreen||root.webkitRequestFullscreen||root.webkitRequestFullScreen||root.mozRequestFullScreen||root.msRequestFullscreen;if(!req){$('v21HomeHint').style.display='none';return;}result=req.call(root);if(window.screen&&window.screen.orientation&&window.screen.orientation.lock){try{window.screen.orientation.lock('landscape').catch(()=>{});}catch (e) { window.__cbLog && window.__cbLog(e); }}}
    if(result&&result.catch)result.catch(()=>{$('v21HomeHint').style.display='none';});setTimeout(v21FsState,120);
  }catch(e){$('v21HomeHint').style.display='none';}
 }
@@ -5124,7 +5241,7 @@ function v21SafeProfile(){const d=DEF.playerProfileV21||{};let a=settings.player
 function v21ApplyAvatar(){const a=v21SafeProfile();let c=(players&&players[0]&&players[0].cow)||null;if(!c||!c.g)return;if(v21AvatarCow!==c){if(v21AvatarCow){(v21AvatarCow.g||v21AvatarCow).traverse(o=>{if(o.isMesh&&o.userData.v21CoatMaterial){if(o.material&&o.material.dispose)o.material.dispose();o.material=matCow;o.userData.v21CoatMaterial=false;}});if(v21AvatarCow.v21Decor){v21AvatarCow.v21Decor.forEach(o=>{o.parent&&o.parent.remove(o);if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});}}v21AvatarCow=c;c.v21Decor=[];c.g.traverse(o=>{if(o.isMesh&&o.material===matCow){o.material=matCow.clone();o.userData.v21CoatMaterial=true;}});const scarf=new THREE.Mesh(new THREE.BoxGeometry(.5,.13,.72),new THREE.MeshLambertMaterial({color:a.scarf}));scarf.position.set(.45,1.1,0);scarf.name='v21Scarf';c.body.add(scarf);c.v21Scarf=scarf;c.v21Decor.push(scarf);const horns=[];[-1,1].forEach(s=>{const h=new THREE.Mesh(new THREE.ConeGeometry(.105,.38,6),new THREE.MeshLambertMaterial({color:0xeee8dc}));h.position.set(.1,1.79,s*.30);h.rotation.z=s*.18;c.head.add(h);h.name='v21Horn';horns.push(h);c.v21Decor.push(h);});c.v21Horns=horns;}
  c.v21Decor&&c.v21Decor.forEach(o=>{if(o.name==='v21Horn')o.visible=!!a.horns;});if(c.v21Scarf){c.v21Scarf.visible=!!a.scarfOn;c.v21Scarf.material.color.set(a.scarf);}
  c.g.traverse(o=>{if(o.isMesh&&o.userData.v21CoatMaterial&&o.material&&o.material.color)o.material.color.set(a.coat);});
- const surname=String(a.surname||'PLAYER').toUpperCase().replace(/[^A-ZА-ЯЁ0-9 -]/g,'').slice(0,12);const num=clamp(+a.number||10,1,99);if(false){c.pname=surname;c.num=num;if(c.numberMesh){c.body.remove(c.numberMesh);if(c.numberTexture)c.numberTexture.dispose();c.numberMesh.geometry.dispose();c.numberMesh.material.dispose();c.numberMesh=null;c.numberTexture=null;}try{attachCowNumber(c);}catch(e){}c._v21Label=surname+'|'+num;}
+ const surname=String(a.surname||'PLAYER').toUpperCase().replace(/[^A-ZА-ЯЁ0-9 -]/g,'').slice(0,12);const num=clamp(+a.number||10,1,99);if(false){c.pname=surname;c.num=num;if(c.numberMesh){c.body.remove(c.numberMesh);if(c.numberTexture)c.numberTexture.dispose();c.numberMesh.geometry.dispose();c.numberMesh.material.dispose();c.numberMesh=null;c.numberTexture=null;}try{attachCowNumber(c);}catch (e) { window.__cbLog && window.__cbLog(e); }c._v21Label=surname+'|'+num;}
 }
 function v21ProfileEditor(){const a=v21SafeProfile();cbOpenModal('playerProfileV21','Редактор внешности',`<div class="cbFeatureGrid"><div class="cbFeatureCard"><label>Цвет меха</label><input id="v21Coat" type="color" value="${a.coat}"></div><div class="cbFeatureCard"><label>Цвет шарфа</label><input id="v21Scarf" type="color" value="${a.scarf}"></div></div><label>Номер игрока</label><input id="v21Number" type="number" min="1" max="99" value="${a.number}"><label>Фамилия</label><input id="v21Surname" type="text" maxlength="12" value="${cbEsc(a.surname)}"><label>Любимое празднование</label><select id="v21Celebration">${['Прыжок','Вращение','Танец','Поклон','Указать на трибуны','Скольжение на коленях','Поднять руки','Командный жест'].map((n,i)=>`<option value="${i}" ${+a.celebration===i?'selected':''}>${n}</option>`).join('')}</select><label><input id="v21ScarfOn" type="checkbox" ${a.scarfOn?'checked':''}> Шарф</label><label><input id="v21Horns" type="checkbox" ${a.horns?'checked':''}> Дополнительные рога</label><button class="mi pri" data-a="v21ProfileSave">Сохранить внешний вид</button><p class="cbFeatureStat">Внешность применяется к управляемой корове и сохраняется на этом устройстве.</p>`);}
 const v21Achievements=[{id:'match1',name:'Первый матч',desc:'Заверши первый матч',icon:'⚽',ok:()=>settings.played>=1},{id:'win1',name:'Первая победа',desc:'Выиграй матч',icon:'🥇',ok:()=>settings.wins>=1},{id:'goals10',name:'Бомбардир',desc:'Забей 10 голов',icon:'🎯',ok:()=>settings.goals>=10},{id:'wins5',name:'Серия побед',desc:'Добейся 5 побед',icon:'🔥',ok:()=>settings.wins>=5},{id:'cup1',name:'Обладатель кубка',desc:'Выиграй турнирный трофей',icon:'🏆',ok:()=>Array.isArray(settings.trophyCabinet)&&settings.trophyCabinet.length>0}];
@@ -5133,8 +5250,8 @@ function v21AchievementsModal(){v21UnlockAchievements();const unlock=settings.ac
 function v21RecordsModal(){const rows=settings.localRecords||[];cbOpenModal('recordsV21','Локальные рекорды',`<div class="cbFeatureGrid"><div class="cbFeatureCard"><b>Матчи</b><div style="font-size:24px">${rows.length}</div></div><div class="cbFeatureCard"><b>Голы</b><div style="font-size:24px">${rows.reduce((n,r)=>n+(+r.goals||0),0)}</div></div><div class="cbFeatureCard"><b>Лучший счёт</b><div style="font-size:24px">${Math.max(0,...rows.map(r=>r.score?+r.score[0]||0:0))}</div></div></div>${rows.slice(0,25).map(r=>`<div class="cbFeatureCard"><b>${cbEsc(r.a||'Команда')} ${r.score&&r.score[0]||0} : ${r.score&&r.score[1]||0} ${cbEsc(r.b||'Соперник')}</b><div class="cbFeatureStat">${cbEsc(r.date||'')} · ${cbEsc(r.mode||'Матч')}</div></div>`).join('')||'<p class="cbFeatureStat">Сыграй матч, чтобы начать историю.</p>'}<button class="mi" data-a="featureClose">Закрыть</button>`);}
 function v21OpenTutorial(){v21TutPage=0;v21TutorialRender();}function v21TutorialRender(){const pages=[['Движение','Веди стиком на своей стороне экрана или используй WASD. Стрелки работают для второго игрока.'],['Удар и пас','«УДАР» завершает атаку, «ПАС» отдаёт мяч партнёру. Удерживай рывок только когда нужно ускориться.'],['Защита','Кнопка «СМЕНА» переключает управляемую корову. Двигайся к сопернику и перекрывай направление передачи.'],['Сохраняй прогресс','Карьера, рекорды, внешний вид и трофеи сохраняются локально в браузере.']];const p=pages[v21TutPage];cbOpenModal('tutorialV21','Обучение · '+(v21TutPage+1)+'/'+pages.length,`<p>${p[0]}</p><p class="cbFeatureStat">${p[1]}</p><div class="cbFeatureGrid"><button class="mi" data-a="v21TutPrev" ${v21TutPage===0?'disabled':''}>Назад</button><button class="mi pri" data-a="v21TutNext">${v21TutPage===pages.length-1?'Завершить':'Далее'}</button></div>`);}
 let v21LastSpoken=0;
-const v21OldSay=say;say=function(key,force){const r=v21OldSay(key,force);try{if(!settings.commentaryVoiceV21||!settings.comment||!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window))return r;const now=Date.now();if(!force&&now-v21LastSpoken<5500)return r;const phrase=String($('commentary')&&$('commentary').textContent||'').trim();if(!phrase)return r;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(phrase);u.lang=({ru:'ru-RU',en:'en-GB',fr:'fr-FR',es:'es-ES',tr:'tr-TR',az:'az-AZ'})[settings.lang]||'ru-RU';u.rate=.96;u.pitch=.9;u.volume=clamp((settings.vMaster||80)/100,0,1);window.speechSynthesis.speak(u);v21LastSpoken=now;}catch(e){}return r;};
-const v21OldSettingChanged=onSettingChanged;onSettingChanged=function(k){v21OldSettingChanged(k);if(k==='commentaryVoiceV21'&& !settings.commentaryVoiceV21 && 'speechSynthesis' in window){try{window.speechSynthesis.cancel();}catch(e){}}if(k==='accessProfile')cbApplyAccess();};
+const v21OldSay=say;say=function(key,force){const r=v21OldSay(key,force);try{if(!settings.commentaryVoiceV21||!settings.comment||!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window))return r;const now=Date.now();if(!force&&now-v21LastSpoken<5500)return r;const phrase=String($('commentary')&&$('commentary').textContent||'').trim();if(!phrase)return r;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(phrase);u.lang=({ru:'ru-RU',en:'en-GB',fr:'fr-FR',es:'es-ES',tr:'tr-TR',az:'az-AZ'})[settings.lang]||'ru-RU';u.rate=.96;u.pitch=.9;u.volume=clamp((settings.vMaster||80)/100,0,1);window.speechSynthesis.speak(u);v21LastSpoken=now;}catch (e) { window.__cbLog && window.__cbLog(e); }return r;};
+const v21OldSettingChanged=onSettingChanged;onSettingChanged=function(k){v21OldSettingChanged(k);if(k==='commentaryVoiceV21'&& !settings.commentaryVoiceV21 && 'speechSynthesis' in window){try{window.speechSynthesis.cancel();}catch (e) { window.__cbLog && window.__cbLog(e); }}if(k==='accessProfile')cbApplyAccess();};
 const _v21RenderHome=renderHome;renderHome=function(){_v21RenderHome();const el=$('tiles');if(el&&!el.querySelector('[data-a="v21Profile"]'))el.insertAdjacentHTML('beforeend',`<button class="mi" data-a="v21Profile">Внешность игрока</button><button class="mi" data-a="v21Achievements">Достижения и трофеи</button><button class="mi" data-a="v21Records">Локальные рекорды</button><button class="mi" data-a="v21Photo">Фоторежим</button><button class="mi" data-a="v21Tutorial">Обучение</button><button class="mi" data-a="v21LocalVersus">Вдвоём на одном экране</button>`);};
 Object.assign(ACT,{
  v21Profile(){v21ProfileEditor();},v21ProfileSave(){const n=$('v21Number'),s=$('v21Surname'),co=$('v21Coat'),sc=$('v21Scarf'),ce=$('v21Celebration');settings.playerProfileV21={coat:co&&co.value||'#d8dce2',scarf:sc&&sc.value||'#b8ff3d',scarfOn:!!$('v21ScarfOn')?.checked,horns:!!$('v21Horns')?.checked,number:clamp(+(n&&n.value)||10,1,99),surname:String(s&&s.value||'PLAYER').trim().slice(0,12)||'PLAYER',celebration:clamp(+(ce&&ce.value)||0,0,7)};save();v21ApplyAvatar();cbCloseModal();},
@@ -5143,7 +5260,7 @@ Object.assign(ACT,{
 });
 // Keep the selected celebration for the player's team and apply the saved look to the controlled cow.
 const v21OldGoal=goal;goal=function(team){v21OldGoal(team);const a=v21SafeProfile();if(team===0&&celeb)celeb.celebrationV15=clamp(+a.celebration||0,0,7);};
-const v21OldSyncScene=syncScene;syncScene=function(dt){v21OldSyncScene(dt);try{v21ApplyAvatar();v21DrawRadar(performance.now());v21SetControlVisibility();}catch(e){}};
+const v21OldSyncScene=syncScene;syncScene=function(dt){v21OldSyncScene(dt);try{v21ApplyAvatar();v21DrawRadar(performance.now());v21SetControlVisibility();}catch (e) { window.__cbLog && window.__cbLog(e); }};
 const v21OldStepGame=stepGame;stepGame=function(dt){if(photoModeState&&photoModeState.active)return;return v21OldStepGame(dt);};
 // Single-button mode: assist the controlled player towards the ball, while preserving original shot physics and AI.
 const v21OldGather=gather;gather=function(p){const o=v21OldGather(p);if(settings.oneButtonV21&&p&&p.id===1&&state==='play'&&!(matchCfg&&matchCfg.versus)){const c=p.cow||cows.find(q=>q.team===0&&q.role!=='gk');if(c){let tx=ball.x,ty=ball.y;if(ball.carrier&&ball.carrier.team===0){tx=FX+FW-8;ty=H/2;}const dx=tx-c.x,dy=ty-c.y,m=Math.hypot(dx,dy)||1;o.x=dx/m;o.y=dy/m;}o.pass=false;o.cross=false;o.sw=false;}if(settings.localTouchV21&&matchCfg&&matchCfg.versus&&(['play','ready','goal','pens'].includes(state)||(state==='rule'&&!!restartStateV17&&!!ruleModalState))){const side=p.id===1?'left':'right',v=v21JoyState[side],a=v21TouchActions[side];if(v.id!==null){o.x=v.x;o.y=v.y;}if(a.kick)o.kick=true;if(a.pass)o.pass=true;if(a.sprint)o.sprint=true;if(a.switch)o.sw=true;}return o;};
@@ -5155,7 +5272,7 @@ document.addEventListener('pointerup',e=>{if(v21PhotoDrag&&e.pointerId===v21Phot
 document.addEventListener('pointerdown',e=>{if(!(settings.localTouchV21&&matchCfg&&matchCfg.versus&&touchUIOn()&&['play','ready','goal'].includes(state)))return;if(e.target.closest('.v21action,[data-a],input,button'))return;const side=e.clientX<innerWidth/2?'left':'right',v=v21JoyState[side];if(v.id!==null)return;v.id=e.pointerId;v.ox=e.clientX;v.oy=e.clientY;v.x=v.y=0;v21joy.style.display='block';v21joy.style.left=e.clientX+'px';v21joy.style.top=e.clientY+'px';e.preventDefault();e.stopPropagation();},true);
 document.addEventListener('pointermove',e=>{for(const side of ['left','right']){const v=v21JoyState[side];if(v.id!==e.pointerId)continue;let dx=e.clientX-v.ox,dy=e.clientY-v.oy,m=Math.hypot(dx,dy),R=52;if(m>R){dx=dx/m*R;dy=dy/m*R;}v.x=clamp(dx/R,-1,1);v.y=clamp(dy/R,-1,1);v21joy.style.left=v.ox+'px';v21joy.style.top=v.oy+'px';e.preventDefault();e.stopPropagation();}},true);
 function v21ReleasePointer(e){for(const side of ['left','right']){const v=v21JoyState[side];if(v.id===e.pointerId){v.id=null;v.x=v.y=0;v21joy.style.display='none';}}}document.addEventListener('pointerup',v21ReleasePointer,true);document.addEventListener('pointercancel',v21ReleasePointer,true);
-v21controls.querySelectorAll('.v21action').forEach(b=>{const [side,key]=b.dataset.v21action.split('-');const down=e=>{e.preventDefault();v21TouchActions[side][key==='switch'?'switch':key]=true;try{b.setPointerCapture(e.pointerId)}catch(_){};};const up=()=>{v21TouchActions[side][key==='switch'?'switch':key]=false;};b.addEventListener('pointerdown',down);['pointerup','pointercancel','lostpointercapture'].forEach(ev=>b.addEventListener(ev,up));});
+v21controls.querySelectorAll('.v21action').forEach(b=>{const [side,key]=b.dataset.v21action.split('-');const down=e=>{e.preventDefault();v21TouchActions[side][key==='switch'?'switch':key]=true;try{b.setPointerCapture(e.pointerId)}catch (_) { window.__cbLog && window.__cbLog(_); };};const up=()=>{v21TouchActions[side][key==='switch'?'switch':key]=false;};b.addEventListener('pointerdown',down);['pointerup','pointercancel','lostpointercapture'].forEach(ev=>b.addEventListener(ev,up));});
 const v21OldApplyUI=applyUIState;applyUIState=function(){v21OldApplyUI();v21SetControlVisibility();};
 const v21OldFinish=finishMatchNow;finishMatchNow=function(){const r=v21OldFinish();v21UnlockAchievements();return r;};
 // Make the selected avatar visible as soon as a match is built and in menu previews where possible.
@@ -5396,7 +5513,7 @@ function stadiumDetailV28() {
       inst(SPH, lam(0xffffff), dr);
     }
     standRoot.add(g); _sdV28 = g;
-  } catch (e) { try { console.warn('stadiumDetailV28', e); } catch (_) {} }
+  } catch (e) { try { console.warn('stadiumDetailV28', e); } catch (_) { window.__cbLog && window.__cbLog(_); } }
 }
 const _applyStadiumStyleV28 = applyStadiumStyle;
 applyStadiumStyle = function () { const r = _applyStadiumStyleV28.apply(this, arguments); stadiumDetailV28(); return r; };
@@ -5430,7 +5547,7 @@ const trT = k => { const o = TRAIN_TXT_V28[k]; return o ? (o[settings.lang] || o
 function trainBestV28() { try { return JSON.parse(localStorage.getItem(TRAIN_KEY_V28)) || {}; } catch (e) { return {}; } }
 function trainSaveBestV28(kind, goals) {
   const b = trainBestV28(), rec = goals > (b[kind] | 0);
-  if (rec) { b[kind] = goals; try { localStorage.setItem(TRAIN_KEY_V28, JSON.stringify(b)); } catch (e) {} }
+  if (rec) { b[kind] = goals; try { localStorage.setItem(TRAIN_KEY_V28, JSON.stringify(b)); } catch (e) { window.__cbLog && window.__cbLog(e); } }
   return rec;
 }
 function renderTrainV28() {
@@ -5464,7 +5581,7 @@ function trainTickV28() {
 function trainFinishV28() {
   const T = trainV28; if (!T) return;
   T.on = false; const kind = T.kind, goals = score[0] | 0, isRec = trainSaveBestV28(kind, goals), b = trainBestV28();
-  try { SFX.whistle(0.9); } catch (e) {}
+  try { SFX.whistle(0.9); } catch (e) { window.__cbLog && window.__cbLog(e); }
   matchCfg.training = false;
   goHome();
   $('sc-trainres').innerHTML = '<div class="wcol"><div class="hubbody"><h1 class="ttl">' + trT('done') + '</h1>' +
@@ -5751,8 +5868,8 @@ function utxPackToneV29(finalTone = false) {
     gain.connect(ctx.destination);
     const notes = finalTone ? [523.25,659.25,783.99] : [220,330];
     notes.forEach((freq,i)=>{const osc=ctx.createOscillator();osc.type=finalTone?'triangle':'sine';osc.frequency.setValueAtTime(freq,now+i*.105);const g=ctx.createGain();g.gain.setValueAtTime(.0001,now+i*.105);g.gain.exponentialRampToValueAtTime(.55,now+i*.105+.025);g.gain.exponentialRampToValueAtTime(.0001,now+i*.105+(finalTone ? .3 : .2));osc.connect(g);g.connect(gain);osc.start(now+i*.105);osc.stop(now+i*.105+(finalTone ? .34 : .24));});
-    setTimeout(()=>{try{gain.disconnect();}catch(e){}},900);
-  } catch (e) {}
+    setTimeout(()=>{try{gain.disconnect();}catch (e) { window.__cbLog && window.__cbLog(e); }},900);
+  } catch (e) { window.__cbLog && window.__cbLog(e); }
 }
 
 showUTReveal = function(card) {
@@ -5992,7 +6109,7 @@ onMatchEnd = function(res) {
       if(sc[0]>sc[1]){ca.seasonWins=(Number(ca.seasonWins)||0)+1;ca.seasonPoints=(Number(ca.seasonPoints)||0)+3;}else if(sc[0]===sc[1]){ca.seasonDraws=(Number(ca.seasonDraws)||0)+1;ca.seasonPoints=(Number(ca.seasonPoints)||0)+1;}
       save();
     }
-  } catch(e) {}
+  } catch (e) { window.__cbLog && window.__cbLog(e); }
   return onMatchEndV29CareerBase.apply(this,arguments);
 };
 const startMatchV29CareerBase = startMatch;
@@ -6004,7 +6121,7 @@ startMatch = function(cfg) {
       const boost=clamp(Math.round((avg-65)/11),0,2);
       cfg=Object.assign({},cfg,{tA:Object.assign({},cfg.tA,{spd:clamp((Number(cfg.tA.spd)||3)+boost,1,5),pow:clamp((Number(cfg.tA.pow)||3)+boost,1,5),def:clamp((Number(cfg.tA.def)||3)+Math.max(0,boost-1),1,5)})});
     }
-  } catch(e) {}
+  } catch (e) { window.__cbLog && window.__cbLog(e); }
   return startMatchV29CareerBase.call(this,cfg);
 };
 
@@ -6189,7 +6306,7 @@ function utxRestoreBackupV31() {
       if (!candidate) continue;
       const parsed = JSON.parse(candidate);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) { raw = candidate; sourceKey = key; break; }
-    } catch (_) {}
+    } catch (_) { window.__cbLog && window.__cbLog(_); }
   }
   if (!raw) { alert(utxT('Резервной копии пока нет. Сначала сыграй или сохрани изменения.')); return; }
   if (!confirm(utxT('Будет восстановлена предыдущая версия сохранения. Текущий прогресс сначала сохранится в отдельную копию. Продолжить?'))) return;
@@ -6199,7 +6316,7 @@ function utxRestoreBackupV31() {
       try {
         const parsedCurrent = JSON.parse(current);
         if (parsedCurrent && typeof parsedCurrent === 'object' && !Array.isArray(parsedCurrent)) localStorage.setItem('cowball_pre_restore_v31', current);
-      } catch (_) {}
+      } catch (_) { window.__cbLog && window.__cbLog(_); }
     }
     // Validate again immediately before the destructive write.
     const recovered = JSON.parse(raw);
@@ -6253,7 +6370,7 @@ const PAD_BUTTONS_V33 = [
 ];
 const PAD_LABELS_V33 = {kick:'Удар',pass:'Пас',cross:'Навес',sprint:'Рывок',sw:'Смена игрока',pause:'Пауза'};
 function gamepadStatusV33(){
-  let pads=[]; try{pads=Array.from(navigator.getGamepads?navigator.getGamepads():[]).filter(Boolean);}catch(e){}
+  let pads=[]; try{pads=Array.from(navigator.getGamepads?navigator.getGamepads():[]).filter(Boolean);}catch (e) { window.__cbLog && window.__cbLog(e); }
   const connected=pads.filter(p=>p.connected);
   return connected.length ? 'Геймпад подключён: '+connected.map(p=>p.id||'Контроллер').join(', ') : 'Геймпад не обнаружен. Подключи контроллер, нажми любую кнопку и открой эту вкладку ещё раз.';
 }
@@ -6333,7 +6450,7 @@ canvas#gl{transform:translate3d(0,0,0);-webkit-transform:translate3d(0,0,0);back
 @media(max-width:700px){#setBody select{max-width:100%;}#setBody .opt{row-gap:8px;}#sc-hub .hubbtns .mi{flex:1 1 42%;}}
 `;
 document.head.appendChild(iosCompatStyleV33);
-if(window.visualViewport){window.visualViewport.addEventListener('resize',()=>{requestAnimationFrame(()=>{try{resizeGL();applyUIState();}catch(e){}});},{passive:true});}
+if(window.visualViewport){window.visualViewport.addEventListener('resize',()=>{requestAnimationFrame(()=>{try{resizeGL();applyUIState();}catch (e) { window.__cbLog && window.__cbLog(e); }});},{passive:true});}
 // Make field paint layers deterministic: the grass texture stays above turf and lines stay above both.
 try{
   if(typeof patchPlane!=='undefined'&&patchPlane){patchPlane.position.y=.012;patchPlane.renderOrder=1;patchPlane.material.polygonOffset=true;patchPlane.material.polygonOffsetFactor=-1;patchPlane.material.polygonOffsetUnits=-1;patchPlane.material.needsUpdate=true;}
@@ -6392,12 +6509,12 @@ syncScene = function (dt) { adTexA.offset.x = (adTexA.offset.x + dt * 0.00022) %
 // ================== v35: ИГРА ПО СЕТИ (WebRTC без сервера: обмен кодами) ==================
 const NET = { role: null, pc: null, rel: null, fast: null, open: false, inp: { x: 0, y: 0, kick: false, pass: false, cross: false, sprint: false, sw: false }, pend: { kick: false, pass: false, cross: false, sw: false }, snap: null, guestRun: false, lastBn: null, code: '', ui: 'menu', msg: '' };
 const NETICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
-const netEnc = async s => { try { if (window.CompressionStream) { const cs = new CompressionStream('deflate'), w = cs.writable.getWriter(); w.write(new TextEncoder().encode(s)); w.close(); const u = new Uint8Array(await new Response(cs.readable).arrayBuffer()); let b = ''; u.forEach(x => { b += String.fromCharCode(x); }); return 'z' + btoa(b); } } catch (e) {} return 'r' + btoa(unescape(encodeURIComponent(s))); };
+const netEnc = async s => { try { if (window.CompressionStream) { const cs = new CompressionStream('deflate'), w = cs.writable.getWriter(); w.write(new TextEncoder().encode(s)); w.close(); const u = new Uint8Array(await new Response(cs.readable).arrayBuffer()); let b = ''; u.forEach(x => { b += String.fromCharCode(x); }); return 'z' + btoa(b); } } catch (e) { window.__cbLog && window.__cbLog(e); } return 'r' + btoa(unescape(encodeURIComponent(s))); };
 const netDec = async c => { c = String(c).replace(/\s+/g, ''); if (c[0] === 'z') { const u = Uint8Array.from(atob(c.slice(1)), ch => ch.charCodeAt(0)), ds = new DecompressionStream('deflate'), w = ds.writable.getWriter(); w.write(u); w.close(); return new TextDecoder().decode(await new Response(ds.readable).arrayBuffer()); } return decodeURIComponent(escape(atob(c.slice(1)))); };
 const netIce = pc => new Promise(res => {
   if (!pc || pc.iceGatheringState === 'complete') return res(true);
   let finished = false;
-  const finish = () => { if (finished) return; finished = true; clearTimeout(timer); try { pc.removeEventListener('icegatheringstatechange', check); } catch (_) {} res(pc.iceGatheringState === 'complete'); };
+  const finish = () => { if (finished) return; finished = true; clearTimeout(timer); try { pc.removeEventListener('icegatheringstatechange', check); } catch (_) { window.__cbLog && window.__cbLog(_); } res(pc.iceGatheringState === 'complete'); };
   const check = () => { if (pc.iceGatheringState === 'complete') finish(); };
   const timer = setTimeout(finish, 15000);
   pc.addEventListener('icegatheringstatechange', check);
@@ -6414,18 +6531,18 @@ function netWatchPCV41(pc) {
     }
   };
 }
-function netSend(o, rel) { const ch = rel ? NET.rel : NET.fast; if (ch && ch.readyState === 'open') { try { ch.send(JSON.stringify(o)); } catch (e) {} } }
-function netReset() { const pc = NET.pc; NET.open = false; if (netDropTimerV41) clearTimeout(netDropTimerV41); netDropTimerV41 = null; NET.pc = NET.rel = NET.fast = null; NET.role = null; NET.guestRun = false; NET.snap = null; NET.code = ''; NET.lastBn = null; try { if (pc) pc.close(); } catch (e) {} }
+function netSend(o, rel) { const ch = rel ? NET.rel : NET.fast; if (ch && ch.readyState === 'open') { try { ch.send(JSON.stringify(o)); } catch (e) { window.__cbLog && window.__cbLog(e); } } }
+function netReset() { const pc = NET.pc; NET.open = false; if (netDropTimerV41) clearTimeout(netDropTimerV41); netDropTimerV41 = null; NET.pc = NET.rel = NET.fast = null; NET.role = null; NET.guestRun = false; NET.snap = null; NET.code = ''; NET.lastBn = null; try { if (pc) pc.close(); } catch (e) { window.__cbLog && window.__cbLog(e); } }
 function netBind(dc) {
   if (dc.label === 'rel') NET.rel = dc; else NET.fast = dc;
   dc.onopen = () => { if (NET.rel && NET.fast && NET.rel.readyState === 'open' && NET.fast.readyState === 'open' && !NET.open) { NET.open = true; NET.ui = 'ready'; NET.msg = ''; renderNet(); } };
-  dc.onmessage = e => { try { netRecv(JSON.parse(e.data)); } catch (err) {} };
+  dc.onmessage = e => { try { netRecv(JSON.parse(e.data)); } catch (err) { window.__cbLog && window.__cbLog(err); } };
   dc.onclose = () => { setTimeout(() => { if (NET.open && dc.readyState === 'closed') netLost(); }, 10000); };
 }
 function netLost() {
   if (!NET.open && NET.ui === 'menu') return;
   const was = NET.open; NET.open = false; NET.guestRun = false; NET.ui = 'menu'; NET.msg = was ? 'Соединение потеряно' : '';
-  if (was) { if (state !== 'menu') { try { ACT.tomenu && ACT.tomenu(); } catch (e) {} } netReset(); try { renderNet(); show('net'); } catch (e) {} }
+  if (was) { if (state !== 'menu') { try { ACT.tomenu && ACT.tomenu(); } catch (e) { window.__cbLog && window.__cbLog(e); } } netReset(); try { renderNet(); show('net'); } catch (e) { window.__cbLog && window.__cbLog(e); } }
 }
 async function netHost() {
   if (typeof RTCPeerConnection === 'undefined') throw new Error('В этом браузере нет WebRTC. Открой игру в актуальном Chrome, Edge, Firefox или Safari через HTTPS.');
@@ -6492,7 +6609,7 @@ setInterval(() => {
   netSend({ t: 'inp', o: { x: nq(o.x), y: nq(o.y), kick: !!o.kick, pass: !!o.pass, cross: !!o.cross, sprint: !!o.sprint, sw: !!o.sw } }, false);
 }, 33);
 function guestStart(m) {
-  try { settings.time = m.time; if (m.stadium) settings.stadium = m.stadium; if (m.tod) settings.tod = m.tod; if (m.weather) settings.weather = m.weather; } catch (e) {}
+  try { settings.time = m.time; if (m.stadium) settings.stadium = m.stadium; if (m.tod) settings.tod = m.tod; if (m.weather) settings.weather = m.weather; } catch (e) { window.__cbLog && window.__cbLog(e); }
   settings.localTouchV21 = false; NET.snap = null; NET.guestRun = true; NET.lastBn = null;
   _smn35({ tA: teamById(m.a), tB: teamById(m.b), size: m.size || 5, versus: true, ko: false, noTactics: true, net: true });
   clearParticles(); setScreen(null); applyUIState();
@@ -6522,7 +6639,9 @@ const _stepGame35 = stepGame;
 stepGame = function (dt) { if (NET.guestRun && NET.role === 'guest' && state !== 'outro') { guestStep(dt); return; } _stepGame35(dt); };
 
 // --- экран «Игра по сети» ---
-const netEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const netEsc = s => String(s == null ? '' : s).replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' })[c]);
+// v50: player-controlled names are stripped of markup characters and control codes at the source, in addition to escaping at render time.
+const cleanNameV50 = (v, max = 14) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f<>&"'`]/g, '').trim().slice(0, max);
 function renderNet() {
   const b = $('netBody'); if (!b) return; const u = NET.ui; let h = '';
   const note = NET.msg ? `<p class="help netMsg">${netEsc(NET.msg)}</p>` : '';
@@ -6801,15 +6920,15 @@ function installCowballPostFXV36() {
       renderer.setRenderTarget(null);
       rawRender(postScene, postCamera);
     } catch (err) {
-      try { renderer.setRenderTarget(null); } catch (_) {}
+      try { renderer.setRenderTarget(null); } catch (_) { window.__cbLog && window.__cbLog(_); }
       console.warn('Cowball post-processing disabled after render error:', err);
       settings.shaderFXV36 = false;
-      try { rawRender(scene, camera); } catch (_) {}
+      try { rawRender(scene, camera); } catch (_) { window.__cbLog && window.__cbLog(_); }
     }
   };
   renderer.__cowballPostFXV36 = { target, material: postMaterial, scene: postScene, camera: postCamera, resize: resizeCowballPostFXV36, update: updateCowballShaderUniforms };
   window.addEventListener('resize', resizeCowballPostFXV36, { passive: true });
-  try { resizeCowballPostFXV36(); } catch (_) {}
+  try { resizeCowballPostFXV36(); } catch (_) { window.__cbLog && window.__cbLog(_); }
 }
 installCowballPostFXV36();
 UTX_DICT['Постобработка и шейдеры'] = ['Post-processing and shaders', 'Post-traitement et shaders', 'Posprocesado y shaders', 'Son işleme ve gölgelendiriciler', 'Post-emal və şaderlər'];
@@ -7229,7 +7348,7 @@ function flushCowballSaveV40() {
     if (!payload || payload.length > 3 * 1024 * 1024) return;
     const previous = localStorage.getItem('cowball');
     if (previous && previous !== payload && previous.length <= 3 * 1024 * 1024) {
-      try { JSON.parse(previous); localStorage.setItem('cowball_backup_v31', previous); } catch (_) {}
+      try { JSON.parse(previous); localStorage.setItem('cowball_backup_v31', previous); } catch (_) { window.__cbLog && window.__cbLog(_); }
     }
     localStorage.setItem('cowball', payload);
   } catch (_) { /* Private browsing/quota restrictions must not stop the match. */ }
@@ -7250,8 +7369,8 @@ finishComp = function () {
 /* ===================== v41: Online Club, Ranked, Friends, Cup & Hardening ===================== */
 // Client-only profiles are intentionally local; global matchmaking/rankings require a trusted backend.
 const NET3V41 = { view: 'lobby', peerProfile: null, processed: [], pendingLost: false };
-function netNickV41() { return (String(settings.netNick || '').trim() || 'Игрок').slice(0, 14); }
-function netRandIdV41() { try { if (crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {} return 'cb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12); }
+function netNickV41() { return cleanNameV50(settings.netNick) || 'Игрок'; }
+function netRandIdV41() { try { if (crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) { window.__cbLog && window.__cbLog(_); } return 'cb-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12); }
 function netProfileV41() {
   let p = settings.netProfileV41;
   if (!p || typeof p !== 'object' || Array.isArray(p)) p = {};
@@ -7340,7 +7459,7 @@ function netCupScoreV41(round, idx, sa, sb, source='manual') {
 }
 function netCupAutoRecordV41(sc, localSide) {
   const cup=settings.netCupV41;if(!cup||!Array.isArray(cup.rounds))return false;
-  const me=netNickV41(), peer=String(NX.peer||NET3V41.peerProfile?.name||'').trim();if(!peer)return false;
+  const me=netNickV41(), peer=cleanNameV50(NX.peer||NET3V41.peerProfile?.name||'');if(!peer)return false;
   const own=Number(sc[localSide]||0), other=Number(sc[localSide===0?1:0]||0);
   for(let r=0;r<cup.rounds.length;r++) for(let i=0;i<cup.rounds[r].length;i++){
     const m=cup.rounds[r][i]; if(!m||!m.a||!m.b||m.winner!==null)continue;
@@ -7600,13 +7719,13 @@ netApplyProfileResultV41=function(sc,localSide,matchId){
 function netCopyTextV42(value,doneMessage){
   const textValue=String(value||'');
   const fallback=()=>{try{const t=document.createElement('textarea');t.value=textValue;t.setAttribute('readonly','');t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();const ok=document.execCommand('copy');t.remove();nxToast(ok?(doneMessage||'Скопировано'):'Не удалось скопировать — выдели текст вручную');}catch(_){nxToast('Не удалось скопировать — выдели текст вручную');}};
-  try { if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(textValue).then(()=>nxToast(doneMessage||'Скопировано')).catch(fallback);return;} } catch(_) {}
+  try { if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(textValue).then(()=>nxToast(doneMessage||'Скопировано')).catch(fallback);return;} } catch (_) { window.__cbLog && window.__cbLog(_); }
   fallback();
 }
 Object.assign(ACT,{
   netDailyClaimV42(d){const id=String(d&&d.v||''),p=netDailyProfileV42(),task=netDailyTasksV42(p).find(x=>x.id===id);if(!task||task.value<task.goal||p.dailyClaimed.includes(id))return;p.dailyClaimed.push(id);p.xp+=task.xp;p.seasonXp+=task.xp;settings.netProfileV41=p;save();renderNet();nxToast('Задание выполнено: +'+task.xp+' XP');},
   netClaimAchievementV42(d){const id=String(d&&d.v||''),p=netDailyProfileV42(),a=netAchievementListV42(p).find(x=>x.id===id);if(!a||!a.goal||p.achievementClaimed.includes(id))return;p.achievementClaimed.push(id);p.xp+=a.xp;p.seasonXp+=a.xp;if(!p.cosmetics.includes(a.prize))p.cosmetics.push(a.prize);p.cosmetics=p.cosmetics.slice(-40);settings.netProfileV41=p;save();renderNet();nxToast('Достижение получено: +'+a.xp+' XP');},
-  netShareCardV42(){const p=netProfileV41(),txt=`COWBALL ONLINE · ${netNickV41()}\nРанг: ${netRankNameV41(p.rating)} (${p.rating})\nМатчи: ${p.games} · Победы: ${p.wins}\nГолы: ${p.goalsFor} · Уровень: ${Math.floor(p.xp/250)+1}\nСезон: ${p.seasonNo} · XP: ${p.xp}`;try{if(navigator.share){navigator.share({title:'Cowball Online',text:txt}).catch(()=>netCopyTextV42(txt,'Карточка скопирована'));return;}}catch(_){}netCopyTextV42(txt,'Карточка игрока скопирована');},
+  netShareCardV42(){const p=netProfileV41(),txt=`COWBALL ONLINE · ${netNickV41()}\nРанг: ${netRankNameV41(p.rating)} (${p.rating})\nМатчи: ${p.games} · Победы: ${p.wins}\nГолы: ${p.goalsFor} · Уровень: ${Math.floor(p.xp/250)+1}\nСезон: ${p.seasonNo} · XP: ${p.xp}`;try{if(navigator.share){navigator.share({title:'Cowball Online',text:txt}).catch(()=>netCopyTextV42(txt,'Карточка скопирована'));return;}}catch (_) { window.__cbLog && window.__cbLog(_); }netCopyTextV42(txt,'Карточка игрока скопирована');},
   netCopyDiagnosticsV42(){const report=['Cowball Online diagnostics','Build: v42','Browser: '+String(navigator.userAgent||'unknown').slice(0,180),'WebRTC: '+(typeof RTCPeerConnection!=='undefined'?'supported':'unavailable'),'Connected: '+!!NET.open,'Role: '+String(NET.role||'none'),'ICE/connection: '+String(NET.pc&&NET.pc.connectionState||'none'),'Data channel: '+String(NET.rel&&NET.rel.readyState||'none'),'Ping ms: '+String(Number.isFinite(Number(NX.ping))?Math.round(Number(NX.ping)):'n/a')].join('\n');netCopyTextV42(report,'Диагностика скопирована');},
   netBackToLobbyV42(){if(!NET.open){NET.ui='menu';NET3V41.view='lobby';setState('menu');show('net');renderNet();return;}NET.ui='ready';NET3V41.view='lobby';if(NET.role==='host'){NX.peerRdy=false;netSend({t:'resetReady'},true);}else{NX.myRdy=false;netSend({t:'rdy',v:false},true);}setState('menu');show('net');renderNet();nxToast('Вернулись в сетевое лобби');}
 });
@@ -7728,7 +7847,7 @@ onMatchEnd=function(res){
         ca.financeHistoryV42.unshift({title:'Матч лиги: '+own+' : '+opp,delta,date:new Date().toLocaleDateString(utxLocale())});ca.financeHistoryV42=ca.financeHistoryV42.slice(0,50);save();
       }
     }
-  }catch(e){}
+  }catch (e) { window.__cbLog && window.__cbLog(e); }
   return _onMatchEndV42Base.apply(this,arguments);
 };
 // Apply the selected career tactic as a small match-only modifier; never mutate the shared team definition.
@@ -7741,7 +7860,7 @@ startMatch=function(cfg){
       const delta={balanced:[0,0,0],press:[1,0,-1],counter:[1,1,-1],possession:[0,-1,1],defensive:[-1,0,1]}[ca.tactic]||[0,0,0];
       next=Object.assign({},cfg,{tA:Object.assign({},cfg.tA,{spd:clamp((Number(cfg.tA.spd)||3)+delta[0],1,5),pow:clamp((Number(cfg.tA.pow)||3)+delta[1],1,5),def:clamp((Number(cfg.tA.def)||3)+delta[2],1,5)})});
     }
-  }catch(e){}
+  }catch (e) { window.__cbLog && window.__cbLog(e); }
   return _startMatchV42Base.call(this,next);
 };
 /* ================= end Cowball v42 enhancement ================= */
@@ -7773,7 +7892,7 @@ window.CowballV45 = {
     else if (p === 'med') { settings.shadowQ = 'low'; settings.grassDetail = true; settings.reflections = false; settings.shaderFXV36 = true; }
     else { settings.shadowQ = 'low'; settings.grassDetail = false; settings.reflections = false; settings.shaderFXV36 = false; }
     renderScale = 1; applyGfxQuality(); applyRes(); save();
-    try { renderSettings(); } catch (_) {}
+    try { renderSettings(); } catch (_) { window.__cbLog && window.__cbLog(_); }
     return true;
   },
   setAdaptive(enabled) { settings.dynamicRes = !!enabled; if (!enabled) { renderScale = 1; applyRes(); lowT = highT = 0; } save(); return settings.dynamicRes; },
@@ -7803,21 +7922,243 @@ setRestartStateV17 = function(type,team,x,y,reason,offender) {
 
 updatePadStatusV33();
 
+{ const _setStateV50 = setState; setState = function (s) { if (state === 'outro' && s !== 'outro') cancelOutroTimersV50(); return _setStateV50.apply(this, arguments); }; }
+
+// v50: narrow, read-mostly hook used by automated tests (see tests/). It exposes no game-changing power beyond what the console already has.
+window.CowballTest = {
+  matchWinner, roundStage, newComp, compPlay, compSimRest, mkMatch, seedRng: seedRngV50, rng: rngV50, cleanName: cleanNameV50,
+  get state() { return state; }, setState: s => setState(s), beginOutro: () => beginOutro(), outroTimers: () => outroTimersV50.length,
+  settings: () => settings, save: () => save(), TEAMS: () => TEAMS
+};
+
+// ===== Cowball v47 UI (merged into the core scope in v50: it needs core variables hidden inside boot()) =====
+/* Cowball v47 UI: league-first club selection, refined player indicator, career summary.
+   Loaded after the core and optional navigation helpers. Keeps the classic-script/GitHub Pages setup. */
+(function () {
+  'use strict';
+
+  const LEAGUES_V47 = [
+    { id: 'premier', name: 'Премьер-лига', country: 'АНГЛИЯ', flag: '🇬🇧', color: '#50a8ff', symbol: '⚡', subtitle: 'Темп, прессинг и быстрые атаки' },
+    { id: 'laliga', name: 'Ла Лига', country: 'ИСПАНИЯ', flag: '🇪🇸', color: '#ff8759', symbol: '☀️', subtitle: 'Техника и контроль мяча' },
+    { id: 'bundesliga', name: 'Бундеслига', country: 'ГЕРМАНИЯ', flag: '🇩🇪', color: '#f04455', symbol: '🛡️', subtitle: 'Интенсивность и вертикальный футбол' },
+    { id: 'seriea', name: 'Серия A', country: 'ИТАЛИЯ', flag: '🇮🇹', color: '#68a8ff', symbol: '🌑', subtitle: 'Тактика и организованная оборона' },
+    { id: 'ligue1', name: 'Лига 1', country: 'ФРАНЦИЯ', flag: '🇫🇷', color: '#ad8aff', symbol: '🚀', subtitle: 'Скорость и молодые таланты' }
+  ];
+  const escV47 = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const leagueInfoV47 = id => LEAGUES_V47.find(l => l.id === id) || null;
+
+  // Restrict club results to the league selected in the new first screen.
+  const eligibleTeamsV47Base = teamsEligibleForFlow;
+  teamsEligibleForFlow = function (flow) {
+    const all = eligibleTeamsV47Base.apply(this, arguments);
+    if (flow && !flow.comp && teamCategory === 'club' && flow.leaguePick) {
+      return all.filter(team => team.league === flow.leaguePick);
+    }
+    return all;
+  };
+
+  const renderTeamsV47Base = renderTeams;
+  renderTeams = function () {
+    const flow = teamFlow;
+    if (!flow) return renderTeamsV47Base.apply(this, arguments);
+
+    // Keep tournament-defined team pools unchanged. The league-first screen is for free selection only.
+    if (flow.comp || teamCategory !== 'club') return renderTeamsV47Base.apply(this, arguments);
+
+    if (flow.leaguePick) {
+      renderTeamsV47Base.apply(this, arguments);
+      const league = leagueInfoV47(flow.leaguePick);
+      const grid = document.getElementById('teamGrid');
+      if (grid && league) {
+        const count = TEAMS.filter(team => team.league === league.id && !team.nation).length;
+        grid.insertAdjacentHTML('afterbegin', `<div class="cb47LeagueHead"><button class="cb47LeagueBack" type="button" data-a="teamleagueback" aria-label="Вернуться к списку лиг">‹ Все лиги</button><div><small>${league.flag} ${league.country}</small><b>${league.name}</b></div><span>${count} клубов</span></div>`);
+        const title = document.getElementById('teamsTitle');
+        if (title) {
+          const prefix = flow.step === 0
+            ? (flow.mode === 'versus' ? 'Игрок 1: выбери команду' : 'Выбери свою команду')
+            : (flow.mode === 'versus' ? 'Игрок 2: выбери команду' : 'Выбери соперника');
+          title.textContent = `${prefix} · ${league.name}`;
+        }
+      }
+      const go = document.getElementById('teamGo');
+      if (go) go.disabled = false;
+      const screen = document.getElementById('sc-teams');
+      if (screen) screen.classList.add('cb47-team-list');
+      return;
+    }
+
+    // League overview: no team may be committed until a league has been opened.
+    renderTeamsV47Base.apply(this, arguments);
+    const grid = document.getElementById('teamGrid');
+    if (!grid) return;
+    const twoPlayer = flow.mode === 'quick' || flow.mode === 'versus' || flow.mode === 'pens';
+    const prompt = flow.step === 0
+      ? (flow.mode === 'versus' ? 'Игрок 1: выбери лигу' : 'Выбери лигу для своей команды')
+      : (flow.mode === 'versus' ? 'Игрок 2: выбери лигу' : 'Выбери лигу соперника');
+    const cards = LEAGUES_V47.map((league, index) => {
+      const clubs = TEAMS.filter(team => team.league === league.id && !team.nation);
+      const avg = clubs.length ? clubs.reduce((sum, team) => sum + teamPower(team), 0) / clubs.length : 0;
+      const samples = clubs.slice(0, 3).map(team => escV47(team.name)).join(' · ');
+      return `<button class="cb47LeagueCard" type="button" role="listitem" data-a="teamleague" data-v="${league.id}" style="--cb47-league:${league.color};--cb47-i:${index}" aria-label="Открыть лигу ${escV47(league.name)}">
+        <span class="cb47LeagueMeta"><span class="cb47LeagueSymbol">${league.symbol}</span><span>${league.flag} ${league.country}</span></span>
+        <strong>${league.name}</strong><span class="cb47LeagueSubtitle">${league.subtitle}</span>
+        <span class="cb47LeagueClubs">${clubs.length} клубов <i>·</i> средняя сила ${avg.toFixed(1)}/5</span>
+        <span class="cb47LeagueExamples">${samples || 'Команды Cowball'}</span>
+        <span class="cb47LeagueOpen">СМОТРЕТЬ КЛУБЫ <b>↗</b></span>
+      </button>`;
+    }).join('');
+    grid.innerHTML = `<div class="cb47LeagueWrap"><div class="cb47LeagueIntro"><span>СОРЕВНОВАНИЯ / КЛУБЫ</span><b>${prompt}</b><small>Сначала выбери лигу — затем клуб из её списка.</small></div><div class="cb47LeagueGrid" role="list">${cards}</div></div>`;
+
+    const title = document.getElementById('teamsTitle');
+    if (title) title.textContent = prompt;
+    const info = document.getElementById('teamInfo');
+    if (info) info.innerHTML = '<b>Выбор по лигам</b><br>Открой лигу, чтобы увидеть её клубы и выбрать команду.';
+    const preview = document.getElementById('matchupPreview');
+    if (preview) preview.classList.add('hide');
+    const go = document.getElementById('teamGo');
+    if (go) {
+      go.textContent = 'Сначала выбери лигу';
+      go.disabled = true;
+      go.classList.add('dis');
+    }
+    const screen = document.getElementById('sc-teams');
+    if (screen) screen.classList.remove('cb47-team-list');
+  };
+
+  // Prevent stale team selections from bypassing the new league screen.
+  const teamGoV47Base = teamGo;
+  teamGo = function () {
+    if (teamFlow && !teamFlow.comp && teamCategory === 'club' && !teamFlow.leaguePick) return;
+    return teamGoV47Base.apply(this, arguments);
+  };
+
+  // New league navigation actions are added to the existing delegated action router.
+  ACT.teamleague = function (data) {
+    if (!teamFlow || teamFlow.comp) return;
+    const league = leagueInfoV47(String(data && data.v || ''));
+    if (!league) return;
+    teamFlow.leaguePick = league.id;
+    teamFlow.balancedOpp = null;
+    const pool = TEAMS.filter(team => team.league === league.id && !team.nation && (teamFlow.step === 0 || team.id !== teamFlow.my));
+    const saved = teamFlow.step === 0 ? pool.find(team => team.id === settings.myTeam) : null;
+    teamFlow.cur = (saved || pool[0] || {}).id || null;
+    renderTeams();
+  };
+  ACT.teamleagueback = function () {
+    if (!teamFlow || teamFlow.comp) return;
+    teamFlow.leaguePick = null;
+    teamFlow.cur = null;
+    teamFlow.balancedOpp = null;
+    renderTeams();
+  };
+
+  const teamCatV47Base = ACT.teamcat;
+  ACT.teamcat = function (data) {
+    if (teamFlow && !teamFlow.comp && data && data.v === 'club') {
+      teamCategory = 'club';
+      teamFlow.leaguePick = null;
+      teamFlow.cur = null;
+      teamFlow.balancedOpp = null;
+      renderTeams();
+      return;
+    }
+    if (teamFlow) teamFlow.leaguePick = null;
+    return teamCatV47Base.apply(this, arguments);
+  };
+
+  const teamBackV47Base = ACT.teamback;
+  ACT.teamback = function () {
+    if (teamFlow && !teamFlow.comp && teamCategory === 'club' && teamFlow.leaguePick) {
+      teamFlow.leaguePick = null;
+      teamFlow.cur = null;
+      teamFlow.balancedOpp = null;
+      renderTeams();
+      return;
+    }
+    return teamBackV47Base.apply(this, arguments);
+  };
+
+  // Add a subtle second halo to the already existing active-player ring and preserve the core marker logic.
+  const halosV47 = markers.map((marker, index) => {
+    const color = index === 0 ? 0xb8ff3d : 0xffffff;
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(1.45, 1.72, 48),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
+    );
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = 0.035;
+    halo.renderOrder = 3;
+    halo.visible = false;
+    scene.add(halo);
+    marker.haloV47 = halo;
+    return halo;
+  });
+  const syncSceneV47Base = syncScene;
+  syncScene = function () {
+    const result = syncSceneV47Base.apply(this, arguments);
+    markers.forEach((marker, index) => {
+      const p = players[index], cow = p && p.cow, halo = halosV47[index];
+      const on = !!(marker.r.visible && cow && (state === 'ready' || state === 'play' || state === 'goal' || state === 'outro' || state === 'replay'));
+      halo.visible = on;
+      if (!on) return;
+      halo.position.set(wx(cow.x), 0.036, wz(cow.y));
+      const pulse = 1 + Math.sin(clock * 0.13 + index * 1.4) * 0.055;
+      halo.scale.setScalar(pulse);
+      halo.material.opacity = 0.16 + (Math.sin(clock * 0.13 + index * 1.4) + 1) * 0.055;
+      marker.r.scale.setScalar(1 + Math.sin(clock * 0.13 + index * 1.4) * 0.025);
+    });
+    return result;
+  };
+
+  // Add real season information to the already persistent career overview without changing save data.
+  const careerRenderV47Base = careerV29Render;
+  careerV29Render = function (tab) {
+    const result = careerRenderV47Base.apply(this, arguments);
+    if ((tab || 'overview') === 'overview') {
+      const root = document.getElementById('cbCareerV29');
+      const career = settings && settings.career;
+      if (root && career && !root.querySelector('.cb47CareerSummary')) {
+        const value = key => Math.max(0, Math.floor(Number(career[key]) || 0));
+        const stats = [
+          ['МАТЧИ', value('seasonMatches')], ['ПОБЕДЫ', value('seasonWins')], ['НИЧЬИ', value('seasonDraws')],
+          ['ЗАБИТО', value('seasonGoals')], ['ПРОПУЩЕНО', value('seasonConceded')], ['ОЧКИ', value('seasonPoints')]
+        ];
+        const summary = document.createElement('section');
+        summary.className = 'cb47CareerSummary';
+        summary.setAttribute('aria-label', 'Статистика текущего сезона');
+        summary.innerHTML = `<div class="cb47CareerSummaryTitle">ТЕКУЩИЙ СЕЗОН <span>№ ${Math.max(1, value('season'))}</span></div><div class="cb47CareerStats">${stats.map(([label, amount]) => `<div><small>${label}</small><b>${amount}</b></div>`).join('')}</div>`;
+        const intro = root.firstElementChild;
+        if (intro) intro.insertAdjacentElement('afterend', summary); else root.insertAdjacentElement('afterbegin', summary);
+      }
+    }
+    return result;
+  };
+
+  // The current card flip stays fully interactive; these styles only enrich its presentation.
+  document.documentElement.classList.add('cb47-ui-ready');
+})();
+// ===== end v47 UI =====
+
 init().then(() => {
+  window.__cowballBooted = true;
   applyShadowPolicyV24();
   if (window.__cowballRecoveredV31) setTimeout(utxShowRecoveryNoticeV31, 450);
 });
 }
 window.addEventListener('error', function (e) {
+  if (window.__cbLog) window.__cbLog(e.error || e.message);
+  // After a successful start a stray error must not replace a running game with the "startup error" screen.
+  if (window.__cowballBooted) return;
   var sp = document.getElementById('splash');
   if (!sp || !sp.parentNode) return;
   sp.style.display = 'flex';
   sp.innerHTML = 'Ошибка запуска Cowball.<br><small style="font-size:14px;font-weight:600;max-width:90vw;text-align:center;line-height:1.5">' + String(e.message || 'Неизвестная ошибка').replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}) + '<br>Закройте игру и откройте HTML ещё раз.</small>';
 });
+window.addEventListener('unhandledrejection', function (e) { if (window.__cbLog) window.__cbLog(e.reason); });
 window.__loadThree(function (ok) {
   var sp = document.getElementById('splash');
   if (!ok) {
-    if (sp) sp.innerHTML = 'Не удалось загрузить 3D-движок Three.js.<br><small style="font-size:15px;font-weight:600;max-width:90vw;text-align:center;line-height:1.5">Нужен интернет для первого запуска или файл lib/three.min.js рядом с HTML. Проверьте соединение и откройте файл снова.</small>';
+    if (sp) sp.innerHTML = 'Не удалось загрузить 3D-движок Three.js.<br><small style="font-size:15px;font-weight:600;max-width:90vw;text-align:center;line-height:1.5">Нужен интернет для первого запуска или файл three.min.js рядом с index.html. Проверьте соединение и откройте файл снова.</small>';
     return;
   }
   try { boot(); }
