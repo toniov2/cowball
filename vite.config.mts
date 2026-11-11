@@ -5,7 +5,7 @@ import { join } from 'node:path';
 /** Legacy classic scripts, styles and media live in the repository root (they must not be renamed).
  *  Vite bundles only src/main.ts; this plugin copies everything else into dist/ unchanged. */
 const NOT_LEGACY = new Set(['server.js', 'eslint.config.mjs', 'tools_check_syntax.js', 'tools_fetch_three.js', 'vite.config.mts']);
-const LEGACY_EXT = /\.(js|css|mp3|png|webmanifest)$/;
+const LEGACY_EXT = /\.(js|css|mp3|png|webmanifest|woff2?)$/;
 
 function legacyAssets(): Plugin {
   return {
