@@ -2,9 +2,9 @@
    - code/pages: network first, cache fallback (updates arrive immediately when online)
    - audio/images/Three.js: cache first
    - the page asks us to "warm" the cache with every file listed below after the first start. */
-const VERSION = 'cowball-v51-0';
+const VERSION = 'cowball-v52-1';
 const CODE = ['./', 'index.html', 'manifest.webmanifest', 'cowball-icon.png', 'three.min.js',
-  'cowball.css', 'cowball-v45.css', 'cowball-v46.css', 'cowball-v47-ui.css', 'cowball-v49-ceremony.css',
+  'cowball-fonts.css', 'font-inter-400.woff', 'font-inter-500.woff', 'font-inter-600.woff', 'font-inter-700.woff', 'font-inter-800.woff', 'cowball.css', 'cowball-v45.css', 'cowball-v46.css', 'cowball-v47-ui.css', 'cowball-v49-ceremony.css',
   'three-loader.js', 'cowball-physics.js', 'cowball-ai.js', 'cowball-rosters.js', 'cowball-core.js', 'ui-effects.js',
   'cowball-v44-navigation.js', 'cowball-v45-lab.js', 'cowball-v46-perf.js', 'cowball-v47-ui.js', 'cowball-v49-ceremony.js', 'cowball-v50-a11y.js', 'cowball-v2.js', 'assets/sim.worker.js'];
 const MEDIA = ['ball-pebble.png', 'grass-field.png', 'kit-weave.png', 'stadium-concrete.png', 'stadium-seats.png',

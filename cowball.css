@@ -545,7 +545,7 @@ html[data-anim="reduced"] .utCard.fut,html[data-anim="off"] .utCard.fut,html[dat
 
 /* ---- Original inline stylesheet 2: id="tetris-ui-skin" ---- */
 /* ===================== TETRIS UI SKIN (Inter + Unbounded, glass, 3D, motion) ===================== */
-:root{--f:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--fd:Unbounded,"Arial Black",system-ui,sans-serif;
+:root{--f:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--fd:Unbounded,Inter,"Arial Black",system-ui,sans-serif;
  --acc:#ff4fa3;--accT:#0b0d1a;--txt:#f4f6ff;--mut:#a9afd0;--line:rgba(255,255,255,.16);--panel:rgba(14,16,36,.55);--radius:22px;--surface:rgba(255,255,255,.07);
  --gl:linear-gradient(155deg,rgba(255,255,255,.16),rgba(255,255,255,.04));--gl2:linear-gradient(155deg,rgba(44,50,96,.78),rgba(14,18,40,.78))}
 html,body{background:#0a0818!important;font-family:var(--f)!important;letter-spacing:0!important;-webkit-font-smoothing:antialiased}

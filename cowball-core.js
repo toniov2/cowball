@@ -1019,15 +1019,33 @@ const seatTexBase = (() => {   // сиденья: цветные секции в
   try { const im = new Image(); im.onload = () => { t.image = im; t.needsUpdate = true; seatMats.forEach(sm => { if (sm.map) { sm.map.image = im; sm.map.needsUpdate = true; } }); }; im.src = 'stadium-seats.png'; } catch (_) { window.__cbLog && window.__cbLog(_); }
   return t;
 })();
+function mergeGeos(parts) {   // слияние статичных геометрий со сдвигом (position/normal/uv/index)
+  let nv = 0, ni = 0; parts.forEach(p => { nv += p.g.attributes.position.count; ni += p.g.index ? p.g.index.count : p.g.attributes.position.count; });
+  const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  let vo = 0, io = 0;
+  parts.forEach(p => {
+    const a = p.g.attributes, n = a.position.count;
+    for (let i = 0; i < n; i++) {
+      pos[(vo + i) * 3] = a.position.getX(i) + p.x; pos[(vo + i) * 3 + 1] = a.position.getY(i) + p.y; pos[(vo + i) * 3 + 2] = a.position.getZ(i) + p.z;
+      nor[(vo + i) * 3] = a.normal.getX(i); nor[(vo + i) * 3 + 1] = a.normal.getY(i); nor[(vo + i) * 3 + 2] = a.normal.getZ(i);
+      uv[(vo + i) * 2] = a.uv.getX(i); uv[(vo + i) * 2 + 1] = a.uv.getY(i);
+    }
+    if (p.g.index) { for (let i = 0; i < p.g.index.count; i++) idx[io++] = p.g.index.getX(i) + vo; } else { for (let i = 0; i < n; i++) idx[io++] = vo + i; }
+    vo += n;
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeBoundingSphere(); return g;
+}
 function buildStand(root, cx, cz, rotY, len, steps, fill, roof) {
   const gp = new THREE.Group(); gp.position.set(cx, 0, cz); gp.rotation.y = rotY; root.add(gp); gp.updateMatrixWorld(true);
   const own = root.userData.own || (root.userData.own = []);
   const tex = seatTexBase.clone(); tex.needsUpdate = true; tex.repeat.set(len / 8, 1);
   const seatMat = new THREE.MeshLambertMaterial({ map: tex }), pg = new THREE.PlaneGeometry(len, 1.25); seatMats.push(seatMat); own.push(seatMat, tex, pg);
+  const stepParts = [], seatParts = [], pgFlat = pg.clone().rotateX(-Math.PI / 2); own.push(pgFlat);
   for (let i = 0; i < steps; i++) {
     const h = 0.7 * (i + 1), z = -i * 1.25;
-    const st = new THREE.Mesh(RBX(len, h, 1.25, 0.16), standM); st.position.set(0, h / 2, z); gp.add(st); own.push(st.geometry);
-    const seat = new THREE.Mesh(pg, seatMat); seat.rotation.x = -Math.PI / 2; seat.position.set(0, h + 0.015, z); gp.add(seat);
+    stepParts.push({ g: RBX(len, h, 1.25, 0.16), x: 0, y: h / 2, z }); seatParts.push({ g: pgFlat, x: 0, y: h + 0.015, z });
     if (fill <= 0) continue;
     for (let x = -len / 2 + 0.8; x < len / 2 - 0.4; x += 1.3) {
       if (Math.random() > fill) continue;
@@ -1040,6 +1058,16 @@ function buildStand(root, cx, cz, rotY, len, steps, fill, roof) {
       const wp = new THREE.Vector3(x, h, z).applyMatrix4(gp.matrixWorld);
       Object.assign(s, { base: h, rot: rotY, px: wp.x, pz: wp.z, ph: Math.random() * 6.28 }); spectators.push(s);
     }
+  }
+  // v52: ступени и сиденья одной трибуны сливаются в 2 меша (было 2 на каждый ряд); при любой ошибке слияния работает прежний путь
+  let merged = false;
+  try {
+    const stM = new THREE.Mesh(mergeGeos(stepParts), standM), seM = new THREE.Mesh(mergeGeos(seatParts), seatMat);
+    stM.frustumCulled = seM.frustumCulled = false; gp.add(stM, seM); own.push(stM.geometry, seM.geometry); merged = true;
+  } catch (err) { console.warn('stand merge fallback', err); }
+  if (!merged) {
+    stepParts.forEach(p => { const m = new THREE.Mesh(p.g, standM); m.position.set(p.x, p.y, p.z); gp.add(m); });
+    seatParts.forEach(p => { const m = new THREE.Mesh(p.g, seatMat); m.position.set(p.x, p.y, p.z); gp.add(m); });
   }
   const back = box(len, 0.7 * steps + 2.5, 0.3, standM); back.position.set(0, (0.7 * steps + 2.5) / 2, -steps * 1.25 - 0.2); gp.add(back); own.push(back.geometry);
   if (roof) {   // навес над главной трибуной: плита, светящийся край и колонны
@@ -1091,7 +1119,7 @@ function buildCrowdInstances(root, E, outer, fill) {
       if (Math.random()>Math.min(.99,fill+0.18)) continue;
       const lx=-sd.len/2+(col+.5)*sd.len/cols+(Math.random()-.5)*.14, lz=-row*1.25-.07;
       const wx0=sd.cx+Math.cos(sd.rot)*lx+Math.sin(sd.rot)*lz, wz0=sd.cz-Math.sin(sd.rot)*lx+Math.cos(sd.rot)*lz;
-      candidates.push({x:wx0,z:wz0,y:.7*(row+1),scale:.78+Math.random()*.34,ph:Math.random()*6.28,side:si,sector:Math.floor(col/Math.max(1,cols/4))});
+      candidates.push({x:wx0,z:wz0,y:.7*(row+1),scale:.78+Math.random()*.34,ph:Math.random()*6.28,side:si,rot:sd.rot,fan:si<2?si:(Math.random()<.5?0:1),look:0,sector:Math.floor(col/Math.max(1,cols/4))});
     }
   });
   // Shuffle once at build time; no new objects are created in the render loop.
@@ -1118,32 +1146,54 @@ function buildCrowdInstances(root, E, outer, fill) {
     }
     color.setHex(ci); obj.position.set(d.x,d.y+.43*d.scale,d.z+.255*d.scale);obj.rotation.set(0,0,0);obj.scale.set(d.scale,d.scale,d.scale);obj.updateMatrix();crowdScarves.setMatrixAt(i,obj.matrix);crowdScarves.setColorAt(i,color);
   });
-  [crowdBodies,crowdHeads,crowdHorns,crowdScarves,crowdEars].forEach(m=>{m.instanceMatrix.needsUpdate=true;m.castShadow=false;m.receiveShadow=false;root.add(m);});
+  [crowdBodies,crowdHeads,crowdHorns,crowdScarves,crowdEars].forEach(m=>{m.instanceMatrix.needsUpdate=true;m.castShadow=false;m.receiveShadow=false;m.frustumCulled=false;root.add(m);});
+  poseCrowd(true);
   root.userData.own.push(bodyGeo,headGeo,hornGeo,scarfGeo,earGeoV24,mat,headMat,hornMat,scarfMat);
 }
-function updateInstancedCrowd(dt) {
-  if(!crowdBodies||!crowdHeads||!crowdEarsV24||!crowdHornsV24||!crowdScarvesV24||!settings.crowdAnimate||settings.powerSave||(gfxLevel()!=='high'&&gfxLevel()!=='ultra')) return;
-  crowdWaveTime+=dt; if(++crowdWaveTick%8!==0) return;
-  const obj=crowdInstObj;
-  crowdInstData.forEach((d,i)=>{
-    const wave=(state==='goal'?0.16:0.055)*Math.max(0,Math.sin(crowdWaveTime*.11-d.x*.34+d.z*.2+d.ph));
-    const sway=Math.sin(crowdWaveTime*.06+d.ph)*.055, nod=Math.sin(crowdWaveTime*.07+d.ph)*.08;
-    obj.position.set(d.x,d.y+.34*d.scale+wave,d.z); obj.rotation.set(0,sway,0); obj.scale.set(d.scale,d.scale,d.scale); obj.updateMatrix(); crowdBodies.setMatrixAt(i,obj.matrix);
-    obj.position.set(d.x,d.y+.67*d.scale+wave,d.z+.015); obj.rotation.set(0,sway,nod); obj.updateMatrix(); crowdHeads.setMatrixAt(i,obj.matrix);
-    for(let h=0;h<2;h++){
-      const side=h?1:-1;
-      obj.position.set(d.x+side*.12*d.scale,d.y+.88*d.scale+wave,d.z);obj.rotation.set(0,sway,side*.18+nod);obj.scale.set(d.scale,d.scale,d.scale);obj.updateMatrix();crowdHornsV24.setMatrixAt(i*2+h,obj.matrix);
-      obj.position.set(d.x+side*.18*d.scale,d.y+.69*d.scale+wave,d.z+.015);obj.rotation.set(0,sway,side*.2+nod);obj.updateMatrix();crowdEarsV24.setMatrixAt(i*2+h,obj.matrix);
+const _crowdCrowdYaw = (th, ox, oz) => [ox * Math.cos(th) + oz * Math.sin(th), -ox * Math.sin(th) + oz * Math.cos(th)];
+function poseCrowd(initial) {
+  if (!crowdBodies || !crowdHeads || !crowdEarsV24 || !crowdHornsV24 || !crowdScarvesV24) return;
+  const obj = crowdInstObj, animate = !initial && settings.crowdAnimate && !settings.powerSave;
+  const goalCheer = animate && (state === 'goal' || (state === 'outro' && outroCheer));   // переменные состояния читаем только в кадре игры (до их объявления нельзя)
+  const bX = animate ? wx(ball.x) : 0, bZ = animate ? wz(ball.y) : 0, T = crowdWaveTime, cr = _crowdCrowdYaw;
+  for (let i = 0, n = crowdInstData.length; i < n; i++) {
+    const d = crowdInstData[i], sc = d.scale; let wave = 0, sway = 0, nod = 0.04, up = 0;
+    if (animate) {
+      wave = (goalCheer ? 0.05 : 0.04) * Math.max(0, Math.sin(T * 0.11 - d.x * 0.34 + d.z * 0.2 + d.ph));
+      sway = Math.sin(T * 0.06 + d.ph) * 0.05;
+      if (goalCheer) { if (d.fan === lastScorer) { wave += Math.abs(Math.sin(T * 0.3 + d.ph)) * 0.45 * sc; up = 1; } else nod = 0.35; }
+      let a = Math.atan2(bX - d.x, bZ - d.z) - d.rot; a = Math.atan2(Math.sin(a), Math.cos(a)); a = a > 0.9 ? 0.9 : a < -0.9 ? -0.9 : a;
+      d.look += (a - d.look) * 0.4;
     }
-    obj.position.set(d.x,d.y+.43*d.scale+wave*.5,d.z+.255*d.scale);obj.rotation.set(0,sway,0);obj.scale.set(d.scale,d.scale,d.scale);obj.updateMatrix();crowdScarvesV24.setMatrixAt(i,obj.matrix);
-  });
-  [crowdBodies,crowdHeads,crowdEarsV24,crowdHornsV24,crowdScarvesV24].forEach(m=>{m.instanceMatrix.needsUpdate=true;});
+    const yB = d.rot + sway, yH = d.rot + sway + d.look;
+    obj.scale.set(sc, sc, sc);
+    obj.position.set(d.x, d.y + 0.34 * sc + wave, d.z); obj.rotation.set(0, yB, 0); obj.updateMatrix(); crowdBodies.setMatrixAt(i, obj.matrix);
+    let o = cr(yH, 0, 0.015);
+    obj.position.set(d.x + o[0], d.y + 0.67 * sc + wave, d.z + o[1]); obj.rotation.set(nod, yH, 0); obj.updateMatrix(); crowdHeads.setMatrixAt(i, obj.matrix);
+    for (let h = 0; h < 2; h++) {
+      const side = h ? 1 : -1;
+      o = cr(yH, side * 0.12 * sc, 0);
+      obj.position.set(d.x + o[0], d.y + (0.88 + up * 0.04) * sc + wave, d.z + o[1]); obj.rotation.set(nod, yH, side * 0.18); obj.updateMatrix(); crowdHornsV24.setMatrixAt(i * 2 + h, obj.matrix);
+      o = cr(yH, side * 0.18 * sc, 0.015);
+      obj.position.set(d.x + o[0], d.y + 0.69 * sc + wave, d.z + o[1]); obj.rotation.set(nod, yH, side * 0.2); obj.updateMatrix(); crowdEarsV24.setMatrixAt(i * 2 + h, obj.matrix);
+    }
+    o = cr(yB, 0, 0.255 * sc);
+    obj.position.set(d.x + o[0], d.y + 0.43 * sc + wave * 0.5, d.z + o[1]); obj.rotation.set(0, yB, 0); obj.updateMatrix(); crowdScarvesV24.setMatrixAt(i, obj.matrix);
+  }
+  crowdBodies.instanceMatrix.needsUpdate = crowdHeads.instanceMatrix.needsUpdate = crowdEarsV24.instanceMatrix.needsUpdate = crowdHornsV24.instanceMatrix.needsUpdate = crowdScarvesV24.instanceMatrix.needsUpdate = true;
+}
+function updateInstancedCrowd(dt) {
+  if (!crowdBodies || !settings.crowdAnimate || settings.powerSave) return;
+  crowdWaveTime += dt;
+  const cheering = state === 'goal' || state === 'outro', every = cheering ? 3 : (crowdInstData.length > 3000 ? 8 : 5);
+  if (++crowdWaveTick % every !== 0) return;
+  poseCrowd(false);
 }
 function buildStands() {
   if (standRoot) { (standRoot.userData.own || []).forEach(o => o.dispose && o.dispose()); scene.remove(standRoot); }
   spectators.length = 0; seatMats.length = 0; standRoot = new THREE.Group(); scene.add(standRoot); standRoot.userData.own=[];
   const f = [0, 0.3, 0.62, 0.85][effCrowd()], E = hx + gDepth + 3.6, outer = E + 4.4;
-  const liveFill = settings.powerSave ? f*.035 : f*.12;
+  const liveFill = 0;   // v52: старые зрители-Group (2 draw call на каждого + цикл на CPU) убраны, всё живёт в InstancedMesh
   // More rows and higher stands create a closed, multi-tier bowl; distant fans are instanced.
   buildStand(standRoot, 0, -hz - 3, 0, outer * 2, 10, liveFill, true);
   buildStand(standRoot, 0, hz + 3, Math.PI, outer * 2, 8, liveFill*.7, false);
@@ -1395,7 +1445,7 @@ function grassFx(c, spd, dt) {
 function kickFx(c, power) {
   if (power > 14) addShake(0.12);
   const lv = effParts(); if (!lv) return; const k = Math.min(1, power / 16); if (k < 0.3) return; const m = lv >= 2 ? 1 : 0.5;
-  const x = wx(ball.x), z = wz(ball.y), r = rings[ringI++ % 3]; r.t = 1; r.k = k; r.m.userData.fieldDynamic = true; r.m.position.set(x, 0.05, z); r.m.material.color.setHex(ball.fire > 0 ? 0xff9a2a : 0xffffff); r.m.visible = true;
+  const x = wx(ball.x), z = wz(ball.y), r = rings[ringI++ % 3]; /* v52: плоское кольцо-волна от удара убрано (выглядело как лишний круг на поле) */ r.t = 0; r.m.visible = false;
   const a = Math.atan2(ball.vy, ball.vx);
   for (let i = 0, n = Math.round((4 + 10 * k) * m); i < n; i++) { const b = a + (Math.random() - 0.5) * 2.6, s = (0.04 + Math.random() * 0.1) * (0.6 + k); sparkPool.spawn(x, BRW, z, Math.cos(b) * s, 0.03 + Math.random() * 0.05, Math.sin(b) * s, 0xffe6a8, 14 + Math.random() * 10); }
   scatterGrass(c, Math.round((2 + 5 * k) * m), 0.05 + 0.04 * k);

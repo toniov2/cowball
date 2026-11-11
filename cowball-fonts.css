@@ -1,0 +1,7 @@
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url('font-inter-400.woff') format('woff')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;src:url('font-inter-500.woff') format('woff')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url('font-inter-600.woff') format('woff')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url('font-inter-700.woff') format('woff')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:800;font-display:swap;src:url('font-inter-800.woff') format('woff')}
+/* Unbounded (заголовки): положите font-unbounded-800.woff2 в корень, и он подхватится сам; пока вместо него Inter 800 */
+@font-face{font-family:'Unbounded';font-style:normal;font-weight:200 900;font-display:swap;src:local('Unbounded'),local('Unbounded ExtraBold')}
